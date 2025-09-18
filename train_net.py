@@ -88,7 +88,7 @@ def metadata_from_json(json_file):
 
 def register_surgical_dataset(cfg):
     dataset_name = cfg.DATASETS.TRAIN[0].split("_")[0]
-    this_dir = os.path.abspath(os.path.abspath(__file__))
+    this_dir = os.path.dirname(os.path.abspath(__file__))
     dataset_path = path_join(this_dir, 'data')
 
     if dataset_name == "endoscapes":
