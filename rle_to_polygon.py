@@ -4,17 +4,12 @@ import json
 import argparse
 import numpy as np
 from tqdm import tqdm
+from utils import load_json
 from pycocotools import mask
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--data_path", type=str, required=True)
 args = parser.parse_args()
-
-def load_json(coco_json_path: str):
-    with open(coco_json_path, 'r') as f:
-        data = json.load(f)
-    
-    return data
 
 def rle_to_polygon(coco_json_path, output_json_path):
     """
@@ -53,12 +48,8 @@ def rle_to_polygon(coco_json_path, output_json_path):
         json.dump(data, f, indent=4)
 
 if __name__ == "__main__":
-    # Parse for sages annotation files
+    # Parse for Endoscapes2023 annotation files
     for split in ['train','val','test']:
         input_coco_json = os.path.join(args.data_path, f"{split}_annotation_coco.json")
         output_coco_json = os.path.join(args.data_path, f"{split}_annotation_coco_polygon.json")
         rle_to_polygon(input_coco_json, output_coco_json)
-    
-    # input_coco_json = os.path.join(args.data_path, f"annotations_C.json")
-    # output_coco_json = os.path.join(args.data_path, f"annotations_C_coco_polygon.json")
-    # rle_to_polygon(input_coco_json, output_coco_json)
