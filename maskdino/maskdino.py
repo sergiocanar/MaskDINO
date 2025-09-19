@@ -245,11 +245,13 @@ class MaskDINO(nn.Module):
                     segments_info (list[dict]): Describe each segment in `panoptic_seg`.
                         Each dict contains keys "id", "category_id", "isthing".
         """
-        images = [x["image"].to(self.device) for x in batched_inputs]
-        images = [(x - self.pixel_mean) / self.pixel_std for x in images]
-        images = ImageList.from_tensors(images, self.size_divisibility)
-
-        features = self.backbone(images.tensor)
+                
+        images = [x["image"].to(self.device) for x in batched_inputs] # List of images list([3,H,W])
+        images = [(x - self.pixel_mean) / self.pixel_std for x in images] #Normalize depending on pixel mean and std
+        images = ImageList.from_tensors(images, self.size_divisibility) #Make images divisible by 32 so it can fit model input
+    
+        features = self.backbone(images.tensor)  #Dict of multiscale features. Hidden dim increased by 2 for every image resolution downsampling by 2
+        #breakpoint()
 
         if self.training:
             # dn_args={"scalar":30,"noise_scale":0.4}
@@ -264,6 +266,7 @@ class MaskDINO(nn.Module):
                 targets = None
             outputs,mask_dict = self.sem_seg_head(features,targets=targets)
             # bipartite matching-based loss
+            #breakpoint()
             losses = self.criterion(outputs, targets,mask_dict)
 
             for k in list(losses.keys()):

@@ -78,7 +78,9 @@ class MSDeformAttnTransformerEncoderOnly(nn.Module):
         return valid_ratio
 
     def forward(self, srcs, masks, pos_embeds):
-
+        
+        #breakpoint()
+        
         enable_mask=0
         if masks is not None:
             for src in srcs:
@@ -179,6 +181,7 @@ class MSDeformAttnTransformerEncoder(nn.Module):
         return reference_points
 
     def forward(self, src, spatial_shapes, level_start_index, valid_ratios, pos=None, padding_mask=None):
+        #breakpoint()
         output = src
         reference_points = self.get_reference_points(spatial_shapes, valid_ratios, device=src.device)
         for _, layer in enumerate(self.layers):
@@ -372,12 +375,15 @@ class MaskDINOEncoder(nn.Module):
         # additional downsampled features
         srcsl = []
         posl = []
+        
+        #breakpoint()
+        
         if self.total_num_feature_levels > self.transformer_num_feature_levels:
             smallest_feat = features[self.transformer_in_features[self.low_resolution_index]].float()
             _len_srcs = self.transformer_num_feature_levels
             for l in range(_len_srcs, self.total_num_feature_levels):
                 if l == _len_srcs:
-                    src = self.input_proj[l](smallest_feat)
+                    src = self.input_proj[l](smallest_feat) #The input features are downsampled from 1536 to 256. Resolution is downsampled by half
                 else:
                     src = self.input_proj[l](srcsl[-1])
                 srcsl.append(src)
@@ -404,6 +410,8 @@ class MaskDINOEncoder(nn.Module):
                 split_size_or_sections[i] = y.shape[1] - level_start_index[i]
         y = torch.split(y, split_size_or_sections, dim=1)
 
+        #breakpoint()
+        
         out = []
         multi_scale_features = []
         num_cur_levels = 0
@@ -413,7 +421,7 @@ class MaskDINOEncoder(nn.Module):
         # append `out` with extra FPN levels
         # Reverse feature maps into top-down order (from low to high resolution)
         for idx, f in enumerate(self.in_features[:self.num_fpn_levels][::-1]):
-            x = features[f].float()
+            x = features[f].float() #Backbone features
             lateral_conv = self.lateral_convs[idx]
             output_conv = self.output_convs[idx]
             cur_fpn = lateral_conv(x)

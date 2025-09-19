@@ -650,7 +650,7 @@ class SwinTransformer(nn.Module):
 
     def forward(self, x):
         """Forward function."""
-        x = self.patch_embed(x)
+        x = self.patch_embed(x) #[B, embedding_dim=192, Wh=256. Ww=256] I created my patch embeddings. In this case I divided it into 4x4 patches resulting into 256 total. (1024/4=256)
 
         Wh, Ww = x.size(2), x.size(3)
         if self.ape:
@@ -660,11 +660,12 @@ class SwinTransformer(nn.Module):
             )
             x = (x + absolute_pos_embed).flatten(2).transpose(1, 2)  # B Wh*Ww C
         else:
-            x = x.flatten(2).transpose(1, 2)
-        x = self.pos_drop(x)
+            x = x.flatten(2).transpose(1, 2) #Now I have flatenized everything. So its (B, WhxWw, Hidden_dim)
+        x = self.pos_drop(x) #Apply dropout: Up to config is 0.3
 
         outs = {}
         for i in range(self.num_layers):
+            # #breakpoint()
             layer = self.layers[i]
             x_out, H, W, x, Wh, Ww = layer(x, Wh, Ww)
 

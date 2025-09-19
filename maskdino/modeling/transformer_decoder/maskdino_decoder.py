@@ -373,6 +373,7 @@ class MaskDINODecoder(nn.Module):
         size_list = []
         # disable mask, it does not affect performance
         enable_mask = 0
+        #breakpoint()
         if masks is not None:
             for src in x:
                 if src.size(2) % 32 or src.size(3) % 32:
@@ -404,10 +405,10 @@ class MaskDINODecoder(nn.Module):
             enc_outputs_coord_unselected = self._bbox_embed(
                 output_memory) + output_proposals  # (bs, \sum{hw}, 4) unsigmoid
             topk = self.num_queries
-            topk_proposals = torch.topk(enc_outputs_class_unselected.max(-1)[0], topk, dim=1)[1]
-            refpoint_embed_undetach = torch.gather(enc_outputs_coord_unselected, 1,
+            topk_proposals = torch.topk(enc_outputs_class_unselected.max(-1)[0], topk, dim=1)[1] #[B,n_proposals=300]
+            refpoint_embed_undetach = torch.gather(enc_outputs_coord_unselected, 1, #Filter bboxes coordinates in the logit space [B, n_proposals=300, 4]
                                                    topk_proposals.unsqueeze(-1).repeat(1, 1, 4))  # unsigmoid
-            refpoint_embed = refpoint_embed_undetach.detach()
+            refpoint_embed = refpoint_embed_undetach.detach() #Detach
 
             tgt_undetach = torch.gather(output_memory, 1,
                                   topk_proposals.unsqueeze(-1).repeat(1, 1, self.hidden_dim))  # unsigmoid
@@ -435,7 +436,7 @@ class MaskDINODecoder(nn.Module):
                 refpoint_embed = box_ops.box_xyxy_to_cxcywh(refpoint_embed) / torch.as_tensor([w, h, w, h],
                                                                                               dtype=torch.float).to(device)
                 refpoint_embed = refpoint_embed.reshape(outputs_mask.shape[0], outputs_mask.shape[1], 4)
-                refpoint_embed = inverse_sigmoid(refpoint_embed)
+                refpoint_embed = inverse_sigmoid(refpoint_embed) #Return to logits
         elif not self.two_stage:
             tgt = self.query_feat.weight[None].repeat(bs, 1, 1)
             refpoint_embed = self.query_embed.weight[None].repeat(bs, 1, 1)
@@ -455,6 +456,7 @@ class MaskDINODecoder(nn.Module):
             predictions_class.append(outputs_class)
             predictions_mask.append(outputs_mask)
         if self.dn != "no" and self.training and mask_dict is not None:
+            #breakpoint()
             refpoint_embed=torch.cat([input_query_bbox,refpoint_embed],dim=1)
 
         hs, references = self.decoder(
@@ -501,13 +503,14 @@ class MaskDINODecoder(nn.Module):
         return out, mask_dict
 
     def forward_prediction_heads(self, output, mask_features, pred_mask=True):
-        decoder_output = self.decoder_norm(output)
-        decoder_output = decoder_output.transpose(0, 1)
-        outputs_class = self.class_embed(decoder_output)
+        decoder_output = self.decoder_norm(output) #Normalize
+        decoder_output = decoder_output.transpose(0, 1) #[n_queries,B, dim]
+        outputs_class = self.class_embed(decoder_output) #Projects into class probs [B, n_queries, classes]
         outputs_mask = None
         if pred_mask:
-            mask_embed = self.mask_embed(decoder_output)
-            outputs_mask = torch.einsum("bqc,bchw->bqhw", mask_embed, mask_features)
+            #breakpoint()
+            mask_embed = self.mask_embed(decoder_output) #[B,n_q,dim]
+            outputs_mask = torch.einsum("bqc,bchw->bqhw", mask_embed, mask_features) #Assign each query a local assigment so I can know where each obj proposal given by the query is located in the image.
 
         return outputs_class, outputs_mask
 

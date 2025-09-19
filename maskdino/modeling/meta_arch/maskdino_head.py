@@ -7,6 +7,7 @@
 import logging
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
+import torch
 from torch import nn
 
 from detectron2.config import configurable
@@ -16,6 +17,8 @@ from detectron2.modeling import SEM_SEG_HEADS_REGISTRY
 from ..transformer_decoder.maskdino_decoder import build_transformer_decoder
 from ..pixel_decoder.maskdino_encoder import build_pixel_decoder
 
+import matplotlib.pyplot as plt
+import numpy as np
 
 @SEM_SEG_HEADS_REGISTRY.register()
 class MaskDINOHead(nn.Module):
@@ -76,6 +79,7 @@ class MaskDINOHead(nn.Module):
 
     def layers(self, features, mask=None,targets=None):
         mask_features, transformer_encoder_features, multi_scale_features = self.pixel_decoder.forward_features(features, mask)
+        #breakpoint()
 
         predictions = self.predictor(multi_scale_features, mask_features, mask, targets=targets)
 
