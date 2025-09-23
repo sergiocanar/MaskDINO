@@ -79,7 +79,7 @@ class MSDeformAttnTransformerEncoderOnly(nn.Module):
 
     def forward(self, srcs, masks, pos_embeds):
         
-        #breakpoint()
+        # breakpoint()
         
         enable_mask=0
         if masks is not None:
@@ -87,8 +87,11 @@ class MSDeformAttnTransformerEncoderOnly(nn.Module):
                 if src.size(2)%32 or src.size(3)%32:
                     enable_mask = 1
         if enable_mask==0:
-            masks = [torch.zeros((x.size(0), x.size(2), x.size(3)), device=x.device, dtype=torch.bool) for x in srcs]
-        # prepare input for encoder
+            # Here Im going to initialize masks as all false since in training and inference masks are both None
+            masks = [torch.zeros((x.size(0), x.size(2), x.size(3)), device=x.device, dtype=torch.bool) for x in srcs] #[B,H,W]
+        # prepare input for encoder. In this implementation, srcs are already in the order from high to low resolution
+        
+        #List for flattenized src, mask, pos_embed
         src_flatten = []
         mask_flatten = []
         lvl_pos_embed_flatten = []
@@ -97,22 +100,26 @@ class MSDeformAttnTransformerEncoderOnly(nn.Module):
             bs, c, h, w = src.shape
             spatial_shape = (h, w)
             spatial_shapes.append(spatial_shape)
-            src = src.flatten(2).transpose(1, 2)
-            mask = mask.flatten(1)
-            pos_embed = pos_embed.flatten(2).transpose(1, 2)
-            lvl_pos_embed = pos_embed + self.level_embed[lvl].view(1, 1, -1)
+            src = src.flatten(2).transpose(1, 2) #[B, HxW, C]. Flatten ft map
+            mask = mask.flatten(1) # [B, HxW]. Flatten mask
+            pos_embed = pos_embed.flatten(2).transpose(1, 2) #[B, HxW, C]. Flatten pos embed
+            lvl_pos_embed = pos_embed + self.level_embed[lvl].view(1, 1, -1) # Add level embed to pos embed. [B, HxW, C]. This allows tokens to have specific positional info depending on which level they are from
+            
+            #Append to lists
             lvl_pos_embed_flatten.append(lvl_pos_embed)
             src_flatten.append(src)
             mask_flatten.append(mask)
-        src_flatten = torch.cat(src_flatten, 1)
-        mask_flatten = torch.cat(mask_flatten, 1)
-        lvl_pos_embed_flatten = torch.cat(lvl_pos_embed_flatten, 1)
-        spatial_shapes = torch.as_tensor(spatial_shapes, dtype=torch.long, device=src_flatten.device)
-        level_start_index = torch.cat((spatial_shapes.new_zeros((1, )), spatial_shapes.prod(1).cumsum(0)[:-1]))
-        valid_ratios = torch.stack([self.get_valid_ratio(m) for m in masks], 1)
+        
+        #Concat all feature maps, masks and pos embeds
+        src_flatten = torch.cat(src_flatten, 1) #[B, sum(Hi*Wi), C]
+        mask_flatten = torch.cat(mask_flatten, 1) #[B, sum(Hi*Wi)]
+        lvl_pos_embed_flatten = torch.cat(lvl_pos_embed_flatten, 1) #[B, sum(Hi*Wi), C]
+        spatial_shapes = torch.as_tensor(spatial_shapes, dtype=torch.long, device=src_flatten.device) # [[H1,W1],[H2,W2],...]
+        level_start_index = torch.cat((spatial_shapes.new_zeros((1, )), spatial_shapes.prod(1).cumsum(0)[:-1])) # [0, H1*W1, H1*W1+H2*W2,...]
+        valid_ratios = torch.stack([self.get_valid_ratio(m) for m in masks], 1) #[B, L, 2], L is the number of feature levels
 
         # encoder
-        memory = self.encoder(src_flatten, spatial_shapes, level_start_index, valid_ratios, lvl_pos_embed_flatten, mask_flatten)
+        memory = self.encoder(src_flatten, spatial_shapes, level_start_index, valid_ratios, lvl_pos_embed_flatten, mask_flatten) #[N, sum(Hi*Wi), C]
 
         return memory, spatial_shapes, level_start_index
 
@@ -139,7 +146,7 @@ class MSDeformAttnTransformerEncoderLayer(nn.Module):
 
     @staticmethod
     def with_pos_embed(tensor, pos):
-        return tensor if pos is None else tensor + pos
+        return tensor if pos is None else tensor + pos #Add positional encoding to the input tensor if exists
 
     def forward_ffn(self, src):
         src2 = self.linear2(self.dropout2(self.activation(self.linear1(src))))
@@ -148,9 +155,16 @@ class MSDeformAttnTransformerEncoderLayer(nn.Module):
         return src
 
     def forward(self, src, pos, reference_points, spatial_shapes, level_start_index, padding_mask=None):
+        
         # self attention
+        # breakpoint()
+        #Get the output of the multi-scale deformable attention module. src is [B, sum(Hi*Wi), C]
         src2 = self.self_attn(self.with_pos_embed(src, pos), reference_points, src, spatial_shapes, level_start_index, padding_mask)
+        
+        #Apply dropout, residual connection and layer norm
         src = src + self.dropout1(src2)
+        
+        #Normalize the output
         src = self.norm1(src)
 
         # ffn
@@ -168,24 +182,26 @@ class MSDeformAttnTransformerEncoder(nn.Module):
     @staticmethod
     def get_reference_points(spatial_shapes, valid_ratios, device):
         reference_points_list = []
-        for lvl, (H_, W_) in enumerate(spatial_shapes):
-
+        for lvl, (H_, W_) in enumerate(spatial_shapes):            
+            #Create a grid of points with shape (H_, W_, 2) where the last dimension is (x,y) coordinates 
             ref_y, ref_x = torch.meshgrid(torch.linspace(0.5, H_ - 0.5, H_, dtype=torch.float32, device=device),
                                           torch.linspace(0.5, W_ - 0.5, W_, dtype=torch.float32, device=device))
-            ref_y = ref_y.reshape(-1)[None] / (valid_ratios[:, None, lvl, 1] * H_)
-            ref_x = ref_x.reshape(-1)[None] / (valid_ratios[:, None, lvl, 0] * W_)
-            ref = torch.stack((ref_x, ref_y), -1)
+            
+            
+            ref_y = ref_y.reshape(-1)[None] / (valid_ratios[:, None, lvl, 1] * H_) #Normalize to [0,1] range
+            ref_x = ref_x.reshape(-1)[None] / (valid_ratios[:, None, lvl, 0] * W_) #Normalize to [0,1] range
+            ref = torch.stack((ref_x, ref_y), -1) #[B, H_*W_, 2]
             reference_points_list.append(ref)
-        reference_points = torch.cat(reference_points_list, 1)
-        reference_points = reference_points[:, :, None] * valid_ratios[:, None]
+        
+        reference_points = torch.cat(reference_points_list, 1) #Stack all feature levels. [B, sum(Hi*Wi), 5,2]
+        reference_points = reference_points[:, :, None] * valid_ratios[:, None] #
         return reference_points
 
     def forward(self, src, spatial_shapes, level_start_index, valid_ratios, pos=None, padding_mask=None):
-        #breakpoint()
         output = src
-        reference_points = self.get_reference_points(spatial_shapes, valid_ratios, device=src.device)
+        reference_points = self.get_reference_points(spatial_shapes, valid_ratios, device=src.device) #Get reference points for all feature levels. [B, sum(Hi*Wi), 5,2]
         for _, layer in enumerate(self.layers):
-            output = layer(output, pos, reference_points, spatial_shapes, level_start_index, padding_mask)
+            output = layer(output, pos, reference_points, spatial_shapes, level_start_index, padding_mask) #We go to MSDeformAttnTransformerEncoderLayer
 
         return output
 
@@ -376,39 +392,50 @@ class MaskDINOEncoder(nn.Module):
         srcsl = []
         posl = []
         
-        #breakpoint()
+        # breakpoint()
         
         if self.total_num_feature_levels > self.transformer_num_feature_levels:
-            smallest_feat = features[self.transformer_in_features[self.low_resolution_index]].float()
+            #I need additional features maps that are downsampled from the lowest resolution feature map used for the transformer
+            #This is because we need the same number of feature maps as in the original deformable detr (5 for Transformer vs 4 from swin(bbone))
+            
+            smallest_feat = features[self.transformer_in_features[self.low_resolution_index]].float() #Lowest HxW resolution feature map used for downsampling. In this case H/32, W/32
             _len_srcs = self.transformer_num_feature_levels
             for l in range(_len_srcs, self.total_num_feature_levels):
                 if l == _len_srcs:
-                    src = self.input_proj[l](smallest_feat) #The input features are downsampled from 1536 to 256. Resolution is downsampled by half
+                    src = self.input_proj[l](smallest_feat) #The input features are downsampled from 1536 to 256. Resolution is downsampled by half. So I have H/64, W/64. Now I have 5 feature maps
                 else:
                     src = self.input_proj[l](srcsl[-1])
-                srcsl.append(src)
-                posl.append(self.pe_layer(src))
+                #Append to additional feature list
+                srcsl.append(src) 
+                posl.append(self.pe_layer(src)) #Positional encoding for the new feature maps
+        #Reverse the additional feature maps
         srcsl = srcsl[::-1]
         # Reverse feature maps
-        for idx, f in enumerate(self.transformer_in_features[::-1]):
-            x = features[f].float()  # deformable detr does not support half precision
-            srcs.append(self.input_proj[idx](x))
-            pos.append(self.pe_layer(x))
+        for idx, f in enumerate(self.transformer_in_features[::-1]): #From the smallest resolution feature map to the largest :)
+            x = features[f].float()  # deformable detr does not support half precision. 
+            srcs.append(self.input_proj[idx](x)) #Add the feature map after passing through 1x1 conv to reduce or increase channel dimension to 256
+            pos.append(self.pe_layer(x)) #Positional encoding for the original feature maps
+        #Merge additional feature maps and original feature maps depending on feature order
         srcs.extend(srcsl) if self.feature_order == 'low2high' else srcsl.extend(srcs)
         pos.extend(posl) if self.feature_order == 'low2high' else posl.extend(pos)
         if self.feature_order != 'low2high':
             srcs = srcsl
             pos = posl
-        y, spatial_shapes, level_start_index = self.transformer(srcs, masks, pos)
+        #So in this srcs I have 5 feature maps. Starting from the lowest resolution to the highest resolution
+        #Masks are both none in training and inference
+        # pos is a list of positional encodings for each feature map in srcs
+        y, spatial_shapes, level_start_index = self.transformer(srcs, masks, pos) #[N, sum(Hi*Wi), C], [[H1,W1],[H2,W2],...], [0, H1*W1, H1*W1+H2*W2,...]
+        # breakpoint()
         bs = y.shape[0]
 
         split_size_or_sections = [None] * self.total_num_feature_levels
         for i in range(self.total_num_feature_levels):
-            if i < self.total_num_feature_levels - 1:
+            if i < self.total_num_feature_levels - 1: #If not the last feature level
                 split_size_or_sections[i] = level_start_index[i + 1] - level_start_index[i]
             else:
                 split_size_or_sections[i] = y.shape[1] - level_start_index[i]
-        y = torch.split(y, split_size_or_sections, dim=1)
+                
+        y = torch.split(y, split_size_or_sections, dim=1) #Each element in the tuple is [N, Hi*Wi, C] for each feature level
 
         #breakpoint()
         
@@ -416,22 +443,36 @@ class MaskDINOEncoder(nn.Module):
         multi_scale_features = []
         num_cur_levels = 0
         for i, z in enumerate(y):
-            out.append(z.transpose(1, 2).view(bs, -1, spatial_shapes[i][0], spatial_shapes[i][1]))
+            # Output the feature maps in the original spatial shapes
+            out.append(z.transpose(1, 2).view(bs, -1, spatial_shapes[i][0], spatial_shapes[i][1])) #[B, C, Hi, Wi]
 
         # append `out` with extra FPN levels
         # Reverse feature maps into top-down order (from low to high resolution)
         for idx, f in enumerate(self.in_features[:self.num_fpn_levels][::-1]):
+            
+            #Extract backbone features for lateral connection. As said in the paper, these features are going to be H/4, W/4 resolution
             x = features[f].float() #Backbone features
+            
+            #This convolution will allow me to have the same number of channels as in the transformer output features
             lateral_conv = self.lateral_convs[idx]
+            
+            # Final convolution
             output_conv = self.output_convs[idx]
-            cur_fpn = lateral_conv(x)
-            # Following FPN implementation, we use nearest upsampling here
+            
+            
+            cur_fpn = lateral_conv(x) #[B, C=256 (same as transformer output), Hi, Wi]
+            # Following FPN implementation, we use nearest upsampling here. Also we sum the upsampled features with the lateral connection features
             y = cur_fpn + F.interpolate(out[self.high_resolution_index], size=cur_fpn.shape[-2:], mode="bilinear", align_corners=False)
             y = output_conv(y)
             out.append(y)
+        # breakpoint()
         for o in out:
             if num_cur_levels < self.total_num_feature_levels:
                 multi_scale_features.append(o)
                 num_cur_levels += 1
+        
+        #mask_features is always 1/4 resolution. As stated in the paper
+        #transformer_encoder_features are the features from the transformer encoder at 1/32 resolution. NOT USED
+        #multi_scale_features are the enhanced multi-scale features starting from 1/4. Are the combined features from the transformer and the backbone. [B, C=256, Hi, Wi]        
         return self.mask_features(out[-1]), out[0], multi_scale_features
 

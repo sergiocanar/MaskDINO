@@ -78,6 +78,12 @@ class MaskDINOHead(nn.Module):
         return self.layers(features, mask,targets=targets)
 
     def layers(self, features, mask=None,targets=None):
+        breakpoint()
+        
+        #mask_features is always 1/4 resolution. As stated in the paper
+        #transformer_encoder_features are the features from the transformer encoder at 1/32 resolution. NOT USED
+        #multi_scale_features are the enhanced multi-scale features starting from 1/4. Are the combined features from the transformer and the backbone. [B, C=256, Hi, Wi]
+
         mask_features, transformer_encoder_features, multi_scale_features = self.pixel_decoder.forward_features(features, mask)
         #breakpoint()
         predictions = self.predictor(multi_scale_features, mask_features, mask, targets=targets)

@@ -369,6 +369,7 @@ class MaskDINODecoder(nn.Module):
         :param targets: used for denoising training
         """
         assert len(x) == self.num_feature_levels
+        breakpoint()
         device = x[0].device
         size_list = []
         # disable mask, it does not affect performance

@@ -247,8 +247,13 @@ class MaskDINO(nn.Module):
         """
                 
         images = [x["image"].to(self.device) for x in batched_inputs] # List of images list([3,H,W])
+        print(f'Original img shape: {images[0].shape}')
         images = [(x - self.pixel_mean) / self.pixel_std for x in images] #Normalize depending on pixel mean and std
+        print(f'Normalized img shape: {images[0].shape}')
         images = ImageList.from_tensors(images, self.size_divisibility) #Make images divisible by 32 so it can fit model input
+        print(f'Padded img shape: {images.tensor.shape}') #Tensor of shape (B,3,H,W) where H and W are divisible by 32
+    
+    
     
         features = self.backbone(images.tensor)  #Dict of multiscale features. Hidden dim increased by 2 for every image resolution downsampling by 2
         #breakpoint()
@@ -277,6 +282,7 @@ class MaskDINO(nn.Module):
                     losses.pop(k)
             return losses
         else:
+            breakpoint()
             outputs, _ = self.sem_seg_head(features)
             mask_cls_results = outputs["pred_logits"]
             mask_pred_results = outputs["pred_masks"]

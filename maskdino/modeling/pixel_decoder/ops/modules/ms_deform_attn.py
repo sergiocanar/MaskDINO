@@ -91,20 +91,34 @@ class MSDeformAttn(nn.Module):
 
         :return output                     (N, Length_{query}, C)
         """
-        N, Len_q, _ = query.shape
-        N, Len_in, _ = input_flatten.shape
+        
+        #In this case the queries are initialized as the outputs of the pixel decoder. [B, sum(Hi*Wi), C]. The tensor has the src and the positional tensor add together.
+        
+        N, Len_q, _ = query.shape #[B, sum(Hi*Wi), C]
+        N, Len_in, _ = input_flatten.shape #[B, sum(Hi*Wi), C]
         assert (input_spatial_shapes[:, 0] * input_spatial_shapes[:, 1]).sum() == Len_in
 
-        value = self.value_proj(input_flatten)
+        value = self.value_proj(input_flatten) #Linear projection of the input features. [B, sum(Hi*Wi), C]
         if input_padding_mask is not None:
-            value = value.masked_fill(input_padding_mask[..., None], float(0))
+            value = value.masked_fill(input_padding_mask[..., None], float(0)) #Fill the padding positions with zeros
+        
+        #We reshape the value tensor to [N, Len_q, n_heads=8, C//n_heads]
         value = value.view(N, Len_in, self.n_heads, self.d_model // self.n_heads)
-        sampling_offsets = self.sampling_offsets(query).view(N, Len_q, self.n_heads, self.n_levels, self.n_points, 2)
-        attention_weights = self.attention_weights(query).view(N, Len_q, self.n_heads, self.n_levels * self.n_points)
+        
+        #Calculate the sampling offsets and attention weights from the query features.
+        #This are the sampling offsets added to the reference points. This are used to compute attn around them.
+        #Originally they're: [N, Len_q, n_heads=8 * n_levels=5 * n_points=4 * 2]
+        sampling_offsets = self.sampling_offsets(query).view(N, Len_q, self.n_heads, self.n_levels, self.n_points, 2) 
+        
+        #Calculate the attention weights for the queries. This is originally [N, Len_q, n_heads=8 * n_levels=5 * n_points=4]. 
+        #This are reshaped into [N, Len_q, n_heads=8, n_levels=5*n_points=4] and softmaxed.
+        attention_weights = self.attention_weights(query).view(N, Len_q, self.n_heads, self.n_levels * self.n_points) #These are the attention weights for each sampling point.
         attention_weights = F.softmax(attention_weights, -1).view(N, Len_q, self.n_heads, self.n_levels, self.n_points)
         # N, Len_q, n_heads, n_levels, n_points, 2
         if reference_points.shape[-1] == 2:
-            offset_normalizer = torch.stack([input_spatial_shapes[..., 1], input_spatial_shapes[..., 0]], -1)
+            #Get the (W, H) for each feature level. [n_levels, 2]
+            offset_normalizer = torch.stack([input_spatial_shapes[..., 1], input_spatial_shapes[..., 0]], -1) 
+            #Calculate the sampling locations by adding the sampling offsets to the reference points. [N, Len_q, n_heads=8, n_levels=5, n_points=4, 2]
             sampling_locations = reference_points[:, :, None, :, None, :] \
                                  + sampling_offsets / offset_normalizer[None, None, None, :, None, :]
         elif reference_points.shape[-1] == 4:
@@ -114,12 +128,22 @@ class MSDeformAttn(nn.Module):
             raise ValueError(
                 'Last dim of reference_points must be 2 or 4, but get {} instead.'.format(reference_points.shape[-1]))
         try:
+            #Run the custom CUDA operation. If not available, run the pytorch version.
+            #CUDA
             output = MSDeformAttnFunction.apply(
-                value, input_spatial_shapes, input_level_start_index, sampling_locations, attention_weights, self.im2col_step)
+                value, # [N, sum(Hi*Wi), n_heads=8, C//n_heads] 
+                input_spatial_shapes, # [n_levels, 2]
+                input_level_start_index, # [hxw1, hxw1+hxw2, ...]
+                sampling_locations, # [N, Len_q, n_heads=8, n_levels=5, n_points=4, 2]
+                attention_weights, # [N, Len_q, n_heads=8, n_levels=5, n_points=4]
+                self.im2col_step #128
+            )
         except:
             # CPU
             output = ms_deform_attn_core_pytorch(value, input_spatial_shapes, sampling_locations, attention_weights)
         # # For FLOPs calculation only
         # output = ms_deform_attn_core_pytorch(value, input_spatial_shapes, sampling_locations, attention_weights)
+        
+        #We reshape the output and run it through the final linear projection. [N, Len_q, C]
         output = self.output_proj(output)
         return output
