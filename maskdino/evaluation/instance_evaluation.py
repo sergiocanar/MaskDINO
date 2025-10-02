@@ -47,6 +47,7 @@ class InstanceSegEvaluator(COCOEvaluator):
         self._logger.info("Preparing results for COCO format ...")
         coco_results = list(itertools.chain(*[x["instances"] for x in predictions]))
         tasks = self._tasks or self._tasks_from_predictions(coco_results)
+        breakpoint()
 
         # unmap the category ids for COCO
         if hasattr(self._metadata, "thing_dataset_id_to_contiguous_id"):
@@ -70,6 +71,7 @@ class InstanceSegEvaluator(COCOEvaluator):
                 result["category_id"] = reverse_id_mapping[category_id]
 
         if self._output_dir:
+            print('El codigo estuvo aqui')
             file_path = os.path.join(self._output_dir, "coco_instances_results.json")
             self._logger.info("Saving results to {}".format(file_path))
             with PathManager.open(file_path, "w") as f:

@@ -369,28 +369,33 @@ class MaskDINODecoder(nn.Module):
         :param targets: used for denoising training
         """
         assert len(x) == self.num_feature_levels
-        breakpoint()
+        #breakpoint()
         device = x[0].device
         size_list = []
         # disable mask, it does not affect performance
         enable_mask = 0
-        #breakpoint()
+        ##breakpoint()
         if masks is not None:
             for src in x:
                 if src.size(2) % 32 or src.size(3) % 32:
                     enable_mask = 1
+        #Same as encoder. We're creating masks as zeros.
         if enable_mask == 0:
             masks = [torch.zeros((src.size(0), src.size(2), src.size(3)), device=src.device, dtype=torch.bool) for src in x]
         src_flatten = []
         mask_flatten = []
         spatial_shapes = []
+        
+        #We're iterating low2high manner the feature_levels
         for i in range(self.num_feature_levels):
             idx=self.num_feature_levels-1-i
             bs, c , h, w=x[idx].shape
-            size_list.append(x[i].shape[-2:])
-            spatial_shapes.append(x[idx].shape[-2:])
-            src_flatten.append(self.input_proj[idx](x[idx]).flatten(2).transpose(1, 2))
-            mask_flatten.append(masks[i].flatten(1))
+            size_list.append(x[i].shape[-2:]) #Add sizes list from biggest to smallest feature level
+            spatial_shapes.append(x[idx].shape[-2:]) #Spatial shape from smallest to biggest feature level
+            src_flatten.append(self.input_proj[idx](x[idx]).flatten(2).transpose(1, 2)) #[B,HxW,C=256]. This is from the smallest to the biggest feature level
+            mask_flatten.append(masks[i].flatten(1)) #[B,HxW]. This is from the biggest to the smallest feature level
+            
+        #Same as encoder. This tensor is [B, sum(HxW), C=256]. Contains all the feature levels from smallest to biggest
         src_flatten = torch.cat(src_flatten, 1)  # bs, \sum{hxw}, c
         mask_flatten = torch.cat(mask_flatten, 1)  # bs, \sum{hxw}
         spatial_shapes = torch.as_tensor(spatial_shapes, dtype=torch.long, device=src_flatten.device)
@@ -400,8 +405,12 @@ class MaskDINODecoder(nn.Module):
         predictions_class = []
         predictions_mask = []
         if self.two_stage:
+            #Memory is update according to bboxes proposals from the encoder. 
+            #The output_proosals are the proposals in the logit space from all feature levels given by the encoder            
             output_memory, output_proposals = gen_encoder_output_proposals(src_flatten, mask_flatten, spatial_shapes)
+            #Normalize the logits with a normalization layer
             output_memory = self.enc_output_norm(self.enc_output(output_memory))
+            #Get unselected class and bbox predictions for all the proposals
             enc_outputs_class_unselected = self.class_embed(output_memory)
             enc_outputs_coord_unselected = self._bbox_embed(
                 output_memory) + output_proposals  # (bs, \sum{hw}, 4) unsigmoid
@@ -411,9 +420,11 @@ class MaskDINODecoder(nn.Module):
                                                    topk_proposals.unsqueeze(-1).repeat(1, 1, 4))  # unsigmoid
             refpoint_embed = refpoint_embed_undetach.detach() #Detach
 
+            #Get the corresponding features from the memory according to the topk proposals
             tgt_undetach = torch.gather(output_memory, 1,
                                   topk_proposals.unsqueeze(-1).repeat(1, 1, self.hidden_dim))  # unsigmoid
 
+            # Here I get the initial class and mask predictions for the selected proposals
             outputs_class, outputs_mask = self.forward_prediction_heads(tgt_undetach.transpose(0, 1), mask_features)
             tgt = tgt_undetach.detach()
             if self.learn_tgt:
@@ -457,7 +468,7 @@ class MaskDINODecoder(nn.Module):
             predictions_class.append(outputs_class)
             predictions_mask.append(outputs_mask)
         if self.dn != "no" and self.training and mask_dict is not None:
-            #breakpoint()
+            ##breakpoint()
             refpoint_embed=torch.cat([input_query_bbox,refpoint_embed],dim=1)
 
         hs, references = self.decoder(
@@ -490,10 +501,13 @@ class MaskDINODecoder(nn.Module):
             predictions_class,predictions_mask=list(predictions_class),list(predictions_mask)
         elif self.training:  # this is to insure self.label_enc participate in the model
             predictions_class[-1] += 0.0*self.label_enc.weight.sum()
-
+            
+        # breakpoint()
         out = {
             'pred_logits': predictions_class[-1],
             'pred_masks': predictions_mask[-1],
+            'hs': hs[-1],
+            'global_img_features': mask_features,
             'pred_boxes':out_boxes[-1],
             'aux_outputs': self._set_aux_loss(
                 predictions_class if self.mask_classification else None, predictions_mask,out_boxes
@@ -509,7 +523,7 @@ class MaskDINODecoder(nn.Module):
         outputs_class = self.class_embed(decoder_output) #Projects into class probs [B, n_queries, classes]
         outputs_mask = None
         if pred_mask:
-            #breakpoint()
+            ##breakpoint()
             mask_embed = self.mask_embed(decoder_output) #[B,n_q,dim]
             outputs_mask = torch.einsum("bqc,bchw->bqhw", mask_embed, mask_features) #Assign each query a local assigment so I can know where each obj proposal given by the query is located in the image.
 

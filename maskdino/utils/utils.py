@@ -45,26 +45,44 @@ def gen_encoder_output_proposals(memory:Tensor, memory_padding_mask:Tensor, spat
     proposals = []
     _cur = 0
     for lvl, (H_, W_) in enumerate(spatial_shapes):
-        mask_flatten_ = memory_padding_mask[:, _cur:(_cur + H_ * W_)].view(N_, H_, W_, 1)
+        
+        # #breakpoint()
+        mask_flatten_ = memory_padding_mask[:, _cur:(_cur + H_ * W_)].view(N_, H_, W_, 1) #Extract the mask for the current feature level [B, H, W, 1]
+        
+        #Valid height and width. To compute the normalization factor
         valid_H = torch.sum(~mask_flatten_[:, :, 0, 0], 1)
         valid_W = torch.sum(~mask_flatten_[:, 0, :, 0], 1)
 
+        #Create a grid of all x, y pixel centers in this feature_map 
         grid_y, grid_x = torch.meshgrid(torch.linspace(0, H_ - 1, H_, dtype=torch.float32, device=memory.device),
                                         torch.linspace(0, W_ - 1, W_, dtype=torch.float32, device=memory.device))
+        #Concatenate the grid to have (x,y) pairs [H, W, 2]
         grid = torch.cat([grid_x.unsqueeze(-1), grid_y.unsqueeze(-1)], -1)
-
+        
+        #Normalize the grid to [0, 1], using the valid height and width
         scale = torch.cat([valid_W.unsqueeze(-1), valid_H.unsqueeze(-1)], 1).view(N_, 1, 1, 2)
         grid = (grid.unsqueeze(0).expand(N_, -1, -1, -1) + 0.5) / scale
+        
+        #Assign boxs sizess. Every grid gets itrs box size. Stride 4: w/h is 0.05
         wh = torch.ones_like(grid) * 0.05 * (2.0 ** lvl)
-        proposal = torch.cat((grid, wh), -1).view(N_, -1, 4)
+        #We get the proposals. [B, H, W, 4]. By concatenating the grid by its 
+        proposal = torch.cat((grid, wh), -1).view(N_, -1, 4) 
         proposals.append(proposal)
         _cur += (H_ * W_)
+    
+    #Concatenate the propsals of all the feature levels. [ B, \sum{H*W}, 4]
     output_proposals = torch.cat(proposals, 1)
+    #Keep only the proposals that are inside the image
     output_proposals_valid = ((output_proposals > 0.01) & (output_proposals < 0.99)).all(-1, keepdim=True)
+    
+    #Use unsigmoid to convert proposals into logits space
     output_proposals = torch.log(output_proposals / (1 - output_proposals))
+    
+    #Remove the proposals that are not valid
     output_proposals = output_proposals.masked_fill(memory_padding_mask.unsqueeze(-1), float('inf'))
     output_proposals = output_proposals.masked_fill(~output_proposals_valid, float('inf'))
 
+    #Remove the corresponding memory positions, so that the attention won't consider them
     output_memory = memory
     output_memory = output_memory.masked_fill(memory_padding_mask.unsqueeze(-1), float(0))
     output_memory = output_memory.masked_fill(~output_proposals_valid, float(0))

@@ -33,7 +33,6 @@ from detectron2.data import MetadataCatalog, build_detection_train_loader
 from detectron2.evaluation import (
     CityscapesInstanceEvaluator,
     CityscapesSemSegEvaluator,
-    COCOEvaluator,
     COCOPanopticEvaluator,
     DatasetEvaluators,
     LVISEvaluator,
@@ -71,6 +70,8 @@ import weakref
 from maskdino.data.datasets.register_coco_dataset import register_coco_instances
 from utils import load_json
 
+from coco_evaluation_features import COCOEvaluator
+
 def metadata_from_json(json_file):
     cats_data = sorted(
         load_json(json_file)["categories"],
@@ -87,7 +88,9 @@ def metadata_from_json(json_file):
 
 
 def register_surgical_dataset(cfg):
-    dataset_name = cfg.DATASETS.TRAIN[0].split("_")[0]
+    print(cfg.DATASETS.TRAIN)
+    dataset_name = "endoscapes"
+    # dataset_name = cfg.DATASETS.TRAIN[0].split("_")[0]
     this_dir = os.path.dirname(os.path.abspath(__file__))
     dataset_path = path_join(this_dir, 'data')
 

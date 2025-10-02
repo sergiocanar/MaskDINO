@@ -79,7 +79,7 @@ class MSDeformAttnTransformerEncoderOnly(nn.Module):
 
     def forward(self, srcs, masks, pos_embeds):
         
-        # breakpoint()
+        # #breakpoint()
         
         enable_mask=0
         if masks is not None:
@@ -157,7 +157,7 @@ class MSDeformAttnTransformerEncoderLayer(nn.Module):
     def forward(self, src, pos, reference_points, spatial_shapes, level_start_index, padding_mask=None):
         
         # self attention
-        # breakpoint()
+        # #breakpoint()
         #Get the output of the multi-scale deformable attention module. src is [B, sum(Hi*Wi), C]
         src2 = self.self_attn(self.with_pos_embed(src, pos), reference_points, src, spatial_shapes, level_start_index, padding_mask)
         
@@ -392,7 +392,7 @@ class MaskDINOEncoder(nn.Module):
         srcsl = []
         posl = []
         
-        # breakpoint()
+        # #breakpoint()
         
         if self.total_num_feature_levels > self.transformer_num_feature_levels:
             #I need additional features maps that are downsampled from the lowest resolution feature map used for the transformer
@@ -425,7 +425,7 @@ class MaskDINOEncoder(nn.Module):
         #Masks are both none in training and inference
         # pos is a list of positional encodings for each feature map in srcs
         y, spatial_shapes, level_start_index = self.transformer(srcs, masks, pos) #[N, sum(Hi*Wi), C], [[H1,W1],[H2,W2],...], [0, H1*W1, H1*W1+H2*W2,...]
-        # breakpoint()
+        # #breakpoint()
         bs = y.shape[0]
 
         split_size_or_sections = [None] * self.total_num_feature_levels
@@ -437,7 +437,7 @@ class MaskDINOEncoder(nn.Module):
                 
         y = torch.split(y, split_size_or_sections, dim=1) #Each element in the tuple is [N, Hi*Wi, C] for each feature level
 
-        #breakpoint()
+        ##breakpoint()
         
         out = []
         multi_scale_features = []
@@ -465,7 +465,7 @@ class MaskDINOEncoder(nn.Module):
             y = cur_fpn + F.interpolate(out[self.high_resolution_index], size=cur_fpn.shape[-2:], mode="bilinear", align_corners=False)
             y = output_conv(y)
             out.append(y)
-        # breakpoint()
+        # #breakpoint()
         for o in out:
             if num_cur_levels < self.total_num_feature_levels:
                 multi_scale_features.append(o)

@@ -665,7 +665,7 @@ class SwinTransformer(nn.Module):
 
         outs = {}
         for i in range(self.num_layers):
-            # #breakpoint()
+            # ##breakpoint()
             layer = self.layers[i]
             x_out, H, W, x, Wh, Ww = layer(x, Wh, Ww)
 

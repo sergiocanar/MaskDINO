@@ -256,7 +256,7 @@ class MaskDINO(nn.Module):
     
     
         features = self.backbone(images.tensor)  #Dict of multiscale features. Hidden dim increased by 2 for every image resolution downsampling by 2
-        #breakpoint()
+        ##breakpoint()
 
         if self.training:
             # dn_args={"scalar":30,"noise_scale":0.4}
@@ -271,7 +271,7 @@ class MaskDINO(nn.Module):
                 targets = None
             outputs,mask_dict = self.sem_seg_head(features,targets=targets)
             # bipartite matching-based loss
-            #breakpoint()
+            ##breakpoint()
             losses = self.criterion(outputs, targets,mask_dict)
 
             for k in list(losses.keys()):
@@ -282,63 +282,47 @@ class MaskDINO(nn.Module):
                     losses.pop(k)
             return losses
         else:
-            breakpoint()
+            #breakpoint()
             outputs, _ = self.sem_seg_head(features)
             mask_cls_results = outputs["pred_logits"]
             mask_pred_results = outputs["pred_masks"]
             mask_box_results = outputs["pred_boxes"]
-            # upsample masks
-            mask_pred_results = F.interpolate(
-                mask_pred_results,
-                size=(images.tensor.shape[-2], images.tensor.shape[-1]),
-                mode="bilinear",
-                align_corners=False,
-            )
+            queries_features = outputs['hs']
+            global_img_features = outputs['global_img_features']
+            # pool once at batch level
+            pooled = F.adaptive_avg_pool2d(global_img_features, (1, 1)).flatten(1)  # [B, C]
 
-            del outputs
+            processed_results_final = []
 
-            processed_results = []
-            for mask_cls_result, mask_pred_result, mask_box_result, input_per_image, image_size in zip(
-                mask_cls_results, mask_pred_results, mask_box_results, batched_inputs, images.image_sizes
-            ):  # image_size is augmented size, not divisible to 32
-                height = input_per_image.get("height", image_size[0])  # real size
+            for i, (mask_cls_result, mask_pred_result, mask_box_result, input_per_image, image_size, queries_feature) in enumerate(
+                zip(mask_cls_results, mask_pred_results, mask_box_results, batched_inputs, images.image_sizes, queries_features)
+            ):
+                height = input_per_image.get("height", image_size[0])
                 width = input_per_image.get("width", image_size[1])
-                processed_results.append({})
-                new_size = mask_pred_result.shape[-2:]  # padded size (divisible to 32)
+                new_size = mask_pred_result.shape[-2:]
+                                
+                
+                
+                # --- instance inference ---
+                mask_box_result = mask_box_result.to(mask_pred_result)
+                height = new_size[0]/image_size[0]*height
+                width = new_size[1]/image_size[1]*width
+                mask_box_result = self.box_postprocess(mask_box_result, height, width)
 
+                instance_r, top_q_idx = retry_if_cuda_oom(self.instance_inference)(
+                    mask_cls_result, mask_pred_result, mask_box_result
+                )
+                instance_r.object_queries = queries_feature[top_q_idx]
 
-                if self.sem_seg_postprocess_before_inference:
-                    mask_pred_result = retry_if_cuda_oom(sem_seg_postprocess)(
-                        mask_pred_result, image_size, height, width
-                    )
-                    mask_cls_result = mask_cls_result.to(mask_pred_result)
-                    # mask_box_result = mask_box_result.to(mask_pred_result)
-                    # mask_box_result = self.box_postprocess(mask_box_result, height, width)
+                # --- global pooled feature for this image ---
+                global_img_feature_pooled = pooled[i]  # [C]
 
-                # semantic segmentation inference
-                if self.semantic_on:
-                    r = retry_if_cuda_oom(self.semantic_inference)(mask_cls_result, mask_pred_result)
-                    if not self.sem_seg_postprocess_before_inference:
-                        r = retry_if_cuda_oom(sem_seg_postprocess)(r, image_size, height, width)
-                    processed_results[-1]["sem_seg"] = r
+                processed_results_final.append({
+                    "instances": instance_r,
+                    "global_img_features": global_img_feature_pooled
+                })
 
-                # panoptic segmentation inference
-                if self.panoptic_on:
-                    panoptic_r = retry_if_cuda_oom(self.panoptic_inference)(mask_cls_result, mask_pred_result)
-                    processed_results[-1]["panoptic_seg"] = panoptic_r
-
-                # instance segmentation inference
-
-                if self.instance_on:
-                    mask_box_result = mask_box_result.to(mask_pred_result)
-                    height = new_size[0]/image_size[0]*height
-                    width = new_size[1]/image_size[1]*width
-                    mask_box_result = self.box_postprocess(mask_box_result, height, width)
-
-                    instance_r = retry_if_cuda_oom(self.instance_inference)(mask_cls_result, mask_pred_result, mask_box_result)
-                    processed_results[-1]["instances"] = instance_r
-
-            return processed_results
+            return processed_results_final
 
     def prepare_targets(self, targets, images):
         h_pad, w_pad = images.tensor.shape[-2:]
@@ -460,17 +444,22 @@ class MaskDINO(nn.Module):
                     )
 
             return panoptic_seg, segments_info
-
     def instance_inference(self, mask_cls, mask_pred, mask_box_result):
         # mask_pred is already processed to have the same shape as original input
         image_size = mask_pred.shape[-2:]
-        scores = mask_cls.sigmoid()  # [100, 80]
-        labels = torch.arange(self.sem_seg_head.num_classes, device=self.device).unsqueeze(0).repeat(self.num_queries, 1).flatten(0, 1)
-        scores_per_image, topk_indices = scores.flatten(0, 1).topk(self.test_topk_per_image, sorted=False)  # select 100
+        scores = mask_cls.sigmoid()  # [Q, num_classes]
+        labels = torch.arange(self.sem_seg_head.num_classes, device=self.device)\
+                    .unsqueeze(0).repeat(self.num_queries, 1).flatten(0, 1)
+
+        # pick top-K by class scores, then map back to queries
+        scores_per_image, topk_indices = scores.flatten(0, 1).topk(self.test_topk_per_image, sorted=False)
         labels_per_image = labels[topk_indices]
-        topk_indices = topk_indices // self.sem_seg_head.num_classes
+        topk_indices = topk_indices // self.sem_seg_head.num_classes   # <-- query indices [K]
+        kept_query_idx = topk_indices
+
         mask_pred = mask_pred[topk_indices]
-        # if this is panoptic segmentation, we only keep the "thing" classes
+
+        # if panoptic, apply keep mask & also filter the query indices accordingly
         if self.panoptic_on:
             keep = torch.zeros_like(scores_per_image).bool()
             for i, lab in enumerate(labels_per_image):
@@ -478,24 +467,24 @@ class MaskDINO(nn.Module):
             scores_per_image = scores_per_image[keep]
             labels_per_image = labels_per_image[keep]
             mask_pred = mask_pred[keep]
+            kept_query_idx = kept_query_idx[keep]             # <-- keep same queries as instances
+
         result = Instances(image_size)
-        # mask (before sigmoid)
         result.pred_masks = (mask_pred > 0).float()
-        # half mask box half pred box
+
         mask_box_result = mask_box_result[topk_indices]
         if self.panoptic_on:
             mask_box_result = mask_box_result[keep]
         result.pred_boxes = Boxes(mask_box_result)
-        # Uncomment the following to get boxes from masks (this is slow)
-        # result.pred_boxes = BitMasks(mask_pred > 0).get_bounding_boxes()
 
-        # calculate average mask prob
-        mask_scores_per_image = (mask_pred.sigmoid().flatten(1) * result.pred_masks.flatten(1)).sum(1) / (result.pred_masks.flatten(1).sum(1) + 1e-6)
+        mask_scores_per_image = (mask_pred.sigmoid().flatten(1) * result.pred_masks.flatten(1)).sum(1) / \
+                                (result.pred_masks.flatten(1).sum(1) + 1e-6)
         if self.focus_on_box:
             mask_scores_per_image = 1.0
         result.scores = scores_per_image * mask_scores_per_image
         result.pred_classes = labels_per_image
-        return result
+
+        return result, kept_query_idx 
 
     def box_postprocess(self, out_bbox, img_h, img_w):
         # postprocess box height and width
