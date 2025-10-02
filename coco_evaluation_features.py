@@ -157,7 +157,6 @@ class COCOEvaluator(DatasetEvaluator):
             
             #Input is a dictionary of input image information
             # Output is a dictionary of the model output: Dictionary containing input img info and the outputs are [0] for instances [1] for global information
-            
             instances = output['instances']
             global_info = output['global_img_features']
 
@@ -169,7 +168,6 @@ class COCOEvaluator(DatasetEvaluator):
 
             if "instances" in output:
                 instances = output["instances"].to(self._cpu_device)
-                # breakpoint()
                 prediction["instances"] = instances_to_coco_json(instances=instances,
                                                                  img_id=input_["image_id"],
                                                                  global_ft=global_info)

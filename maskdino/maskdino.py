@@ -291,37 +291,65 @@ class MaskDINO(nn.Module):
             global_img_features = outputs['global_img_features']
             # pool once at batch level
             pooled = F.adaptive_avg_pool2d(global_img_features, (1, 1)).flatten(1)  # [B, C]
+            
+            mask_pred_results = F.interpolate(
+                mask_pred_results,
+                size=(images.tensor.shape[-2], images.tensor.shape[-1]),
+                mode="bilinear",
+                align_corners=False,
+            )
 
             processed_results_final = []
 
             for i, (mask_cls_result, mask_pred_result, mask_box_result, input_per_image, image_size, queries_feature) in enumerate(
-                zip(mask_cls_results, mask_pred_results, mask_box_results, batched_inputs, images.image_sizes, queries_features)
-            ):
+                zip(mask_cls_results, mask_pred_results, mask_box_results, batched_inputs, images.image_sizes, queries_features)):
+                
                 height = input_per_image.get("height", image_size[0])
                 width = input_per_image.get("width", image_size[1])
                 new_size = mask_pred_result.shape[-2:]
-                                
-                
-                
-                # --- instance inference ---
-                mask_box_result = mask_box_result.to(mask_pred_result)
-                height = new_size[0]/image_size[0]*height
-                width = new_size[1]/image_size[1]*width
-                mask_box_result = self.box_postprocess(mask_box_result, height, width)
 
-                instance_r, top_q_idx = retry_if_cuda_oom(self.instance_inference)(
-                    mask_cls_result, mask_pred_result, mask_box_result
-                )
-                instance_r.object_queries = queries_feature[top_q_idx]
+                final_dict = {}
+            
+                if self.sem_seg_postprocess_before_inference:
+                    mask_pred_result = retry_if_cuda_oom(sem_seg_postprocess)(
+                        mask_pred_result, image_size, height, width
+                    )
+                    mask_cls_result = mask_cls_result.to(mask_pred_result)
+                    # mask_box_result = mask_box_result.to(mask_pred_result)
+                    # mask_box_result = self.box_postprocess(mask_box_result, height, width)
 
-                # --- global pooled feature for this image ---
-                global_img_feature_pooled = pooled[i]  # [C]
+                                # semantic segmentation inference
+                if self.semantic_on:
+                    r = retry_if_cuda_oom(self.semantic_inference)(mask_cls_result, mask_pred_result)
+                    if not self.sem_seg_postprocess_before_inference:
+                        r = retry_if_cuda_oom(sem_seg_postprocess)(r, image_size, height, width)
+                    processed_results_final[-1]["sem_seg"] = r
 
-                processed_results_final.append({
-                    "instances": instance_r,
-                    "global_img_features": global_img_feature_pooled
-                })
+                # panoptic segmentation inference
+                if self.panoptic_on:
+                    panoptic_r = retry_if_cuda_oom(self.panoptic_inference)(mask_cls_result, mask_pred_result)
+                    processed_results_final[-1]["panoptic_seg"] = panoptic_r
+                    
+                if self.instance_on:                            
+                    # --- instance inference ---
+                    mask_box_result = mask_box_result.to(mask_pred_result)
+                    height = new_size[0]/image_size[0]*height
+                    width = new_size[1]/image_size[1]*width
+                    mask_box_result = self.box_postprocess(mask_box_result, height, width)
 
+                    instance_r, top_q_idx = retry_if_cuda_oom(self.instance_inference)(
+                        mask_cls_result, mask_pred_result, mask_box_result
+                    )
+                    instance_r.object_queries = queries_feature[top_q_idx]
+
+                    # --- global pooled feature for this image ---
+                    global_img_feature_pooled = pooled[i]  # [C]
+                    
+                    final_dict["instances"] = instance_r
+                    final_dict["global_img_features"] = global_img_feature_pooled
+                    processed_results_final.append(final_dict)
+                    
+          
             return processed_results_final
 
     def prepare_targets(self, targets, images):
@@ -445,7 +473,7 @@ class MaskDINO(nn.Module):
 
             return panoptic_seg, segments_info
     def instance_inference(self, mask_cls, mask_pred, mask_box_result):
-        # mask_pred is already processed to have the same shape as original input
+
         image_size = mask_pred.shape[-2:]
         scores = mask_cls.sigmoid()  # [Q, num_classes]
         labels = torch.arange(self.sem_seg_head.num_classes, device=self.device)\
