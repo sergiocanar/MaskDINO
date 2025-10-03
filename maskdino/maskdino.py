@@ -247,11 +247,11 @@ class MaskDINO(nn.Module):
         """
                 
         images = [x["image"].to(self.device) for x in batched_inputs] # List of images list([3,H,W])
-        print(f'Original img shape: {images[0].shape}')
+        # print(f'Original img shape: {images[0].shape}')
         images = [(x - self.pixel_mean) / self.pixel_std for x in images] #Normalize depending on pixel mean and std
-        print(f'Normalized img shape: {images[0].shape}')
+        # print(f'Normalized img shape: {images[0].shape}')
         images = ImageList.from_tensors(images, self.size_divisibility) #Make images divisible by 32 so it can fit model input
-        print(f'Padded img shape: {images.tensor.shape}') #Tensor of shape (B,3,H,W) where H and W are divisible by 32
+        # print(f'Padded img shape: {images.tensor.shape}') #Tensor of shape (B,3,H,W) where H and W are divisible by 32
     
     
     
@@ -509,7 +509,7 @@ class MaskDINO(nn.Module):
                                 (result.pred_masks.flatten(1).sum(1) + 1e-6)
         if self.focus_on_box:
             mask_scores_per_image = 1.0
-        result.scores = scores_per_image * mask_scores_per_image
+        result.scores_dist = scores_per_image * mask_scores_per_image
         result.pred_classes = labels_per_image
 
         return result, kept_query_idx 

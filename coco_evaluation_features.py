@@ -416,13 +416,13 @@ def instances_to_coco_json(instances, img_id, global_ft):
     # ---- Initialize flags up-front so they're always defined
     has_mask = instances.has("pred_masks")
     has_embd = False
-    has_decod_out = False
+    has_obj_queries = False
     has_score_dist = False
 
     # ---- Core fields (boxes / scores / classes)
     boxes = instances.pred_boxes.tensor.detach().cpu().numpy()
     boxes = BoxMode.convert(boxes, BoxMode.XYXY_ABS, BoxMode.XYWH_ABS).tolist()
-    scores = instances.scores.detach().cpu().tolist()
+    scores = instances.scores_dist.detach().cpu().tolist()
     classes = instances.pred_classes.detach().cpu().tolist()
 
     # ---- Optional: mask embeddings
@@ -433,14 +433,14 @@ def instances_to_coco_json(instances, img_id, global_ft):
     # ---- Optional: decoder outputs (consistent key names)
     #   If your Instances stores it as 'decoder_out', use that key.
     #   If you actually store 'object_queries', change both lines accordingly.
-    if instances.has("decoder_out"):
-        dec_outs = instances.decoder_out.detach().cpu().tolist()
-        has_decod_out = True
+    if instances.has("object_queries"):
+        dec_outs = instances.object_queries.detach().cpu().tolist()
+        has_obj_queries = True
 
     # ---- Optional: per-class score distributions
     #   Use the correct key: 'score_dist' (not 'scores')
-    if instances.has("score_dist"):
-        score_dists = instances.score_dist.detach().cpu().tolist()
+    if instances.has("scores_dist"):
+        score_dists = instances.scores_dist.detach().cpu().tolist()
         has_score_dist = True
 
     # ---- Masks (RLE encode if present)
@@ -451,7 +451,8 @@ def instances_to_coco_json(instances, img_id, global_ft):
         ]
         for rle in rles:
             rle["counts"] = rle["counts"].decode("utf-8")
-
+            
+    # breakpoint()
     # ---- Build results
     results = []
     for k in range(num_instance):
@@ -465,7 +466,7 @@ def instances_to_coco_json(instances, img_id, global_ft):
             result["segmentation"] = rles[k]
         if has_embd:
             result["mask_embd"] = embeds[k]
-        if has_decod_out:
+        if has_obj_queries:
             result["decoder_out"] = dec_outs[k]
         if has_score_dist:
             result["score_dist"] = score_dists[k]
