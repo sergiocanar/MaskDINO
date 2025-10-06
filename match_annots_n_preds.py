@@ -570,6 +570,11 @@ if "pth" in args.preds_path:
     for pred in tqdm(preds, desc="Filtering preds"):
         instances = filter_preds(pred["instances"], args.selection, selection_params)
         data_dict[pred["image_id"]]["predictions"].extend(instances)
+        
+        if not "global_ft" in data_dict[pred["image_id"]].keys() and "global_ft" in pred.keys():
+            data_dict[pred["image_id"]]["global_ft"] = pred["global_ft"]
+        else:
+            continue
 
 elif "json" in args.preds_path:
     # Load the predictions from a .json file
@@ -622,7 +627,7 @@ for idx in tqdm(data_dict, desc="Matching annotations"):
     num_preds = len(predictions)
     width = data_dict[idx]["width"]
     height = data_dict[idx]["height"]
-
+    
     # Prepare a dictionary to save features for the current image
     feat_save = {
         "image_id": idx,
@@ -630,6 +635,7 @@ for idx in tqdm(data_dict, desc="Matching annotations"):
         "features": {},
         "width": width,
         "height": height,
+        "global_features": data_dict[idx]["global_ft"] if "global_ft" in data_dict[idx].keys() else [],
     }
 
     # Copy basic image information to the annotations and predictions dictionaries
@@ -794,6 +800,10 @@ for idx in tqdm(data_dict, desc="Matching annotations"):
 
     # Append the feature save dictionary to the save_feats list
     save_feats.append(feat_save)
+    
+# breakpoint()
+# if len(predictions) > 0 and "global_ft" in predictions[0]:
+#     feat_save["global_features"] = predictions[0]["global_ft"]
 
 # Save output files
 os.makedirs(os.path.dirname(args.out_coco_anns_path), exist_ok=True)
