@@ -445,6 +445,7 @@ class MaskDINODecoder(nn.Module):
                     refpoint_embed = box_ops.masks_to_boxes(flaten_mask > 0).to(device)
                 else:
                     assert NotImplementedError
+                # breakpoint()
                 refpoint_embed = box_ops.box_xyxy_to_cxcywh(refpoint_embed) / torch.as_tensor([w, h, w, h],
                                                                                               dtype=torch.float).to(device)
                 refpoint_embed = refpoint_embed.reshape(outputs_mask.shape[0], outputs_mask.shape[1], 4)
@@ -490,9 +491,11 @@ class MaskDINODecoder(nn.Module):
         # iteratively box prediction
         if self.initial_pred:
             out_boxes = self.pred_box(references, hs, refpoint_embed.sigmoid())
+            # breakpoint()
             assert len(predictions_class) == self.num_layers + 1
         else:
             out_boxes = self.pred_box(references, hs)
+        # breakpoint()
         if mask_dict is not None:
             predictions_mask=torch.stack(predictions_mask)
             predictions_class=torch.stack(predictions_class)
@@ -501,7 +504,7 @@ class MaskDINODecoder(nn.Module):
             predictions_class,predictions_mask=list(predictions_class),list(predictions_mask)
         elif self.training:  # this is to insure self.label_enc participate in the model
             predictions_class[-1] += 0.0*self.label_enc.weight.sum()
-            
+                
         # breakpoint()
         out = {
             'pred_logits': predictions_class[-1],

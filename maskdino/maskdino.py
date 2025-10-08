@@ -21,7 +21,6 @@ from .modeling.criterion import SetCriterion
 from .modeling.matcher import HungarianMatcher
 from .utils import box_ops
 
-
 @META_ARCH_REGISTRY.register()
 class MaskDINO(nn.Module):
     """
@@ -107,7 +106,7 @@ class MaskDINO(nn.Module):
         self.focus_on_box = focus_on_box
         self.transform_eval = transform_eval
         self.semantic_ce_loss = semantic_ce_loss
-
+        
         if not self.semantic_on:
             assert self.sem_seg_postprocess_before_inference
 
@@ -299,14 +298,17 @@ class MaskDINO(nn.Module):
                 align_corners=False,
             )
 
+            
             processed_results_final = []
 
             for i, (mask_cls_result, mask_pred_result, mask_box_result, input_per_image, image_size, queries_feature) in enumerate(
                 zip(mask_cls_results, mask_pred_results, mask_box_results, batched_inputs, images.image_sizes, queries_features)):
                 
-                height = input_per_image.get("height", image_size[0])
-                width = input_per_image.get("width", image_size[1])
-                new_size = mask_pred_result.shape[-2:]
+                height = input_per_image.get("height", image_size[0]) #Og img 
+                width = input_per_image.get("width", image_size[1]) #Og img 
+                new_size = mask_pred_result.shape[-2:] #Mask size
+                
+                # breakpoint()
 
                 final_dict = {}
             
