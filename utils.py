@@ -7,6 +7,10 @@ def load_json(coco_json_path: str):
     
     return data
 
+def save_json(data_dict: dict, save_path: str):
+    with open(save_path, 'w') as f:
+        json.dump(data_dict, f, indent=4)
+
 def inverse_sigmoid(x, eps=1e-5):
     x = x.clamp(min=0, max=1)
     x1 = x.clamp(min=eps)
