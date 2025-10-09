@@ -119,10 +119,10 @@ if __name__ == "__main__":
     data_dir = path_join(this_dir, 'data', 'endoscapes')
     frames_dir = path_join(data_dir, 'frames')
     annots_dir = path_join(data_dir, 'annotations_201')
-    annots2_dir = path_join(data_dir, 'annotations')
+    annots2_dir = path_join(data_dir, '201_annotations')
     coco_path = path_join(annots_dir, 'all_seg_201.json')  # GT masks
     coco_bbox_path = path_join(annots2_dir, 'train_annotation_coco.json')  # secondary bboxes
-    output_dir = path_join(this_dir, 'visualizations', 'endoscapes201_compare')
+    output_dir = path_join(this_dir, 'visualizations', 'endoscapes201_compare_new')
     os.makedirs(output_dir, exist_ok=True)
 
     plot_random_samples(coco_path, coco_bbox_path, frames_dir, output_dir, num_samples=10)

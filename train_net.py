@@ -89,15 +89,14 @@ def metadata_from_json(json_file):
 
 def register_surgical_dataset(cfg):
     print(cfg.DATASETS.TRAIN)
-    dataset_name = "endoscapes"
-    # dataset_name = cfg.DATASETS.TRAIN[0].split("_")[0]
+    dataset_name = cfg.DATASETS.TRAIN[0].split("_")[0]
     this_dir = os.path.dirname(os.path.abspath(__file__))
     dataset_path = path_join(this_dir, 'data')
 
     if dataset_name == "endoscapes":
         dataset_path = path_join(dataset_path, "endoscapes")
         image_root = path_join(dataset_path, "frames")
-        annotation_path = path_join(dataset_path, "annotations")
+        annotation_path = path_join(dataset_path, "201_annotations")
         metadata = metadata_from_json(
             path_join(
                 annotation_path,

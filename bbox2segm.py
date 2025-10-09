@@ -6,26 +6,25 @@ import torch.nn.functional as F
 from os.path import join as path_join
 
 from detectron2.data import DatasetCatalog
-from detectron2.data.common import DatasetFromList, MapDataset
-from torch.utils.data import DataLoader, SequentialSampler
-from coco_instance_dataset_mapper import COCOInstanceNewBaselineDatasetMapper
 from detectron2.data import transforms as T
+from torch.utils.data import DataLoader, SequentialSampler
+from detectron2.data.common import DatasetFromList, MapDataset
+from coco_instance_dataset_mapper import COCOInstanceNewBaselineDatasetMapper
 
 
+import pycocotools.mask as mask_util
 from detectron2.config import get_cfg
 from detectron2.data import DatasetCatalog
 from detectron2.engine import DefaultPredictor
-from detectron2.structures import ImageList, BoxMode, Boxes
-from detectron2.data import build_detection_train_loader
+from detectron2.utils.memory import retry_if_cuda_oom
 from detectron2.projects.deeplab import add_deeplab_config
 from detectron2.modeling.postprocessing import sem_seg_postprocess
-from detectron2.utils.memory import retry_if_cuda_oom
-import pycocotools.mask as mask_util
+from detectron2.structures import ImageList, BoxMode, Boxes
 
 from tqdm import tqdm
-from utils import inverse_sigmoid, save_json
 from maskdino.utils import box_ops
 from maskdino import add_maskdino_config
+from utils import inverse_sigmoid, save_json
 from train_net import register_surgical_dataset
 
 def trivial_batch_collator(batch):

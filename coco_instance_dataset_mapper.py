@@ -185,9 +185,14 @@ class COCOInstanceNewBaselineDatasetMapper:
             # [(0,0), (2,0), (0,2)] cropped by a box [(1,0),(2,2)] (XYXY format). The tight
             # bounding box of the cropped triangle should be [(1,0),(2,1)], which is not equal to
             # the intersection of original bounding box and the cropping box.
-            if not instances.has('gt_masks'):  # this is to avoid empty annotation
-                instances.gt_masks = PolygonMasks([])
-            instances.gt_boxes = instances.gt_masks.get_bounding_boxes()
+            # --- Handle bbox-only datasets safely ---
+            if hasattr(instances, 'gt_masks'):
+                # Normal case: get boxes from real masks
+                instances.gt_boxes = instances.gt_masks.get_bounding_boxes()
+            else:
+                # No masks present — just keep the boxes that come from annotations
+                pass  # do nothing; boxes are already set by annotations_to_instances()
+
             # Need to filter empty instances first (due to augmentation)
             instances = utils.filter_empty_instances(instances)
             # Generate masks from polygon
