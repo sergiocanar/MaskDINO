@@ -48,7 +48,7 @@ def plot_random_samples(
         file_name = img_info["file_name"]
         img_path = os.path.join(images_dir, file_name)
         if not os.path.exists(img_path):
-            print(f"⚠️ Image not found: {img_path}")
+            print(f"Image not found: {img_path}")
             continue
 
         img = plt.imread(img_path)
