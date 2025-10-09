@@ -8,6 +8,8 @@ from os.path import join as path_join
 from detectron2.data import DatasetCatalog
 from detectron2.data.common import DatasetFromList, MapDataset
 from torch.utils.data import DataLoader, SequentialSampler
+from coco_instance_dataset_mapper import COCOInstanceNewBaselineDatasetMapper
+from detectron2.data import transforms as T
 
 
 from detectron2.config import get_cfg
@@ -25,7 +27,6 @@ from utils import inverse_sigmoid, save_json
 from maskdino.utils import box_ops
 from maskdino import add_maskdino_config
 from train_net import register_surgical_dataset
-from maskdino.data.dataset_mappers.coco_instance_new_baseline_dataset_mapper import COCOInstanceNewBaselineDatasetMapper
 
 def trivial_batch_collator(batch):
     """
@@ -86,12 +87,16 @@ def get_raw_preds(model, image_list, h, w):
         mask_features, _, x = model.sem_seg_head.pixel_decoder.forward_features(features, target) 
 
         B = mask_features.shape[0]
-
+        
         #1.5 Create per level binary masks for the FPN features (empty)
         level_masks = [torch.zeros((src.size(0), src.size(2), src.size(3)), device=src.device, dtype=torch.bool) for src in x]
 
         #2. Convert my GT boxes to normnalized cxcywh and project to query embeddings
         gt_instances = sample["instances"].to(model.device)
+        
+        if not hasattr(gt_instances, "gt_boxes"):
+            return None
+
         gt_boxes = gt_instances.gt_boxes.tensor  # [N_objects, 4] in xyxy
         refpoint_embed = box_ops.box_xyxy_to_cxcywh(gt_boxes)  # [N_objects, 4] in cxcywh
         refpoint_embed = refpoint_embed / torch.as_tensor([w, h, w, h], device=model.device)  # Normalize to [0, 1]
@@ -137,11 +142,12 @@ def get_raw_preds(model, image_list, h, w):
         spatial_shapes = []
         # decoder expects smallest->largest in the flattened sequence
         for i in range(len(x)):
-            idx = len(x) - 1 - i  # reverse
-            src_l = predictor_head.input_proj[idx](x[idx]).flatten(2).transpose(1, 2)  # [B, H*W, C]
-            src_flatten.append(src_l)
-            mask_flatten.append(level_masks[i].flatten(1))  # note they use masks in opposite order
-            spatial_shapes.append(x[idx].shape[-2:])
+            idx=len(x)-1-i
+            bs, c , h_, w_ =x[idx].shape
+            src_l = predictor_head.input_proj[idx](x[idx]).flatten(2).transpose(1, 2)
+            src_flatten.append(src_l) #[B,HxW,C=256]. This is from the smallest to the biggest feature level
+            mask_flatten.append(level_masks[i].flatten(1)) #[B,HxW]. This is from the biggest to the smallest feature level
+            spatial_shapes.append(x[idx].shape[-2:]) #Spatial shape from smallest to biggest feature level
 
         src_flatten = torch.cat(src_flatten, dim=1)                  # [B, sum(HW), C]
         mask_flatten = torch.cat(mask_flatten, dim=1)                # [B, sum(HW)]
@@ -158,7 +164,7 @@ def get_raw_preds(model, image_list, h, w):
             predictions_class.append(out_cls0)
             predictions_mask.append(out_mask0)
 
-        # 6) Run the decoder with your refpoints
+        # 6) Run the decoder with the refpoints I created
         hs, references = predictor_head.decoder(
             tgt=tgt_in.transpose(0, 1),                 # [num_queries, B, D]
             memory=src_flatten.transpose(0, 1),         # [sum(HW), B, C]
@@ -186,11 +192,10 @@ def get_raw_preds(model, image_list, h, w):
         pred_masks  = predictions_mask[-1]      # [B, num_queries, H/4, W/4]
         pred_bboxes = out_boxes[-1]
         # upsample to original size
-        pred_masks_up = F.interpolate(pred_masks, size=(h, w), mode="bilinear", align_corners=False).sigmoid()
-        
-        return pred_masks_up, pred_logits, pred_bboxes
+                
+        return pred_masks, pred_logits, pred_bboxes
 
-def instances_to_coco_json(instances, img_id):
+def instances_to_coco_json(instances, img_id, ann_id):
     """
     Dump an "Instances" object to a COCO-format json that's used for evaluation.
     """
@@ -251,8 +256,9 @@ def instances_to_coco_json(instances, img_id):
     results = []
     for k in range(num_instance):
         result = {
+            "id": ann_id,
             "image_id": img_id,
-            "category_id": classes[k],
+            "category_id": classes[k] + 1,
             "bbox": boxes[k],
             "score": scores[k],
         }
@@ -264,6 +270,9 @@ def instances_to_coco_json(instances, img_id):
             result["decoder_out"] = dec_outs[k]
         if has_score_dist:
             result["score_dist"] = score_dists[k]
+        
+        ann_id+=1
+        
         results.append(result)
     
     results = remove_duplicates_n_features(results)
@@ -286,7 +295,6 @@ cfg.SOLVER.IMS_PER_BATCH = 1
 # cfg.MODEL.MaskDINO.TEST.INSTANCE_ON = False  # Skip standard inference
 cfg.freeze()
 
-
 #Register the surgical dataset as in TAPIS
 register_surgical_dataset(cfg)
 dataset_dicts = DatasetCatalog.get("endoscapes_train")
@@ -298,7 +306,7 @@ model.eval()
 
 #Build dataloader based on the config and the registered dataset
 dataset_name = "endoscapes_train"
-mapper = COCOInstanceNewBaselineDatasetMapper(cfg, is_train=True)
+mapper = COCOInstanceNewBaselineDatasetMapper(cfg, is_train=False)
 
 # Build Detectron2-style dataset but without sampling repetition
 dataset = DatasetFromList(dataset_dicts, copy=False)
@@ -361,16 +369,17 @@ pbar = tqdm(total=total_frames, desc="Processing frame...", unit="frame", ncols=
 
 for batch in data_loader:  
     for sample in batch:
+        
+        #Image information dict for COCO
         img_info_dict = {}
 
         # --- Get image and metadata ---
         file_name = os.path.basename(sample["file_name"])
         img_id = sample["image_id"]
         image = sample["image"].to(model.device)
-        h, w = image.shape[-2:]
         og_h = sample['height']
         og_w = sample['width']
-
+                
         img_info_dict["file_name"] = file_name
         img_info_dict["height"] = og_h
         img_info_dict["width"] = og_w
@@ -378,20 +387,51 @@ for batch in data_loader:
 
         final_dict["images"].append(img_info_dict)
 
+        # Apply transformations for inference!
+        resize = T.ResizeShortestEdge(
+            short_edge_length=(800, 800),
+            max_size=1333,
+            sample_style="choice"
+        )
+        
+        aug_input = T.AugInput(image.permute(1, 2, 0).cpu().numpy())  # (H,W,C)
+        transforms = resize(aug_input)
+        image = torch.as_tensor(
+            aug_input.image.transpose(2, 0, 1), device=model.device
+        )  # back to (C,H,W)        
+
+        h, w = image.shape[-2:]
+
         # --- Preprocess and inference ---
         image_input = (image - model.pixel_mean) / model.pixel_std
-        image_list = ImageList.from_tensors([image_input], model.size_divisibility)
+        images = ImageList.from_tensors([image_input], model.size_divisibility)
 
-        raw_masks_preds, raw_classes_preds, raw_bboxes_preds = get_raw_preds(
+        preds = get_raw_preds(
             model=model,
-            image_list=image_list,
+            image_list=images,
             h=h,
             w=w
         )
-
+        
+        if preds is None:
+            print(f'\n Skipping image: {file_name}. No bboxes! \n')
+            pbar.update(1)
+            continue
+        
+        raw_masks_preds, raw_classes_preds, raw_bboxes_preds = preds
+        
+        raw_masks_preds = F.interpolate(
+                raw_masks_preds,
+                size=(images.tensor.shape[-2], images.tensor.shape[-1]),
+                mode="bilinear",
+                align_corners=False,
+            )
+        
         for mask_cls_result, mask_pred_result, mask_box_result in zip(raw_classes_preds, raw_masks_preds, raw_bboxes_preds):
-            new_size = mask_pred_result.shape[-2:]
-            input_img_size = (h, w)
+            new_size = mask_pred_result.shape[-2:] #768, 1344
+            #height=og_h
+            #width=og_w
+            input_img_size = (h, w) #749,1333 Is the img size used for the model before the divisibility check.
 
             mask_pred_result = retry_if_cuda_oom(sem_seg_postprocess)(
                 mask_pred_result, input_img_size, og_h, og_w
@@ -407,9 +447,13 @@ for batch in data_loader:
                 mask_cls_result, mask_pred_result, mask_box_result
             )
 
+            ann_id = f'{img_id}0'
+            ann_id = int(ann_id)
+
             final_results = instances_to_coco_json(
                 instances=instance_r,
-                img_id=img_id
+                img_id=img_id,
+                ann_id=ann_id
             )
             final_dict["annotations"].extend(final_results)
 

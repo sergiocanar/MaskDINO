@@ -111,8 +111,13 @@ class COCOInstanceNewBaselineDatasetMapper:
     @classmethod
     def from_config(cls, cfg, is_train=True):
         # Build augmentation
-        tfm_gens = build_transform_gen(cfg, is_train)
-
+        
+        if is_train:
+                
+            tfm_gens = build_transform_gen(cfg, is_train)
+        else:
+            tfm_gens = None
+            
         ret = {
             "is_train": is_train,
             "tfm_gens": tfm_gens,
@@ -132,16 +137,17 @@ class COCOInstanceNewBaselineDatasetMapper:
         image = utils.read_image(dataset_dict["file_name"], format=self.img_format)
         utils.check_image_size(dataset_dict, image)
 
-        breakpoint()
-        
         # TODO: get padding mask
         # by feeding a "segmentation mask" to the same transforms
         padding_mask = np.ones(image.shape[:2])
-
-        image, transforms = T.apply_transform_gens(self.tfm_gens, image)
-        # the crop transformation has default padding value 0 for segmentation
-        padding_mask = transforms.apply_segmentation(padding_mask)
-        padding_mask = ~ padding_mask.astype(bool)
+        
+        if self.is_train:
+            image, transforms = T.apply_transform_gens(self.tfm_gens, image)
+            # the crop transformation has default padding value 0 for segmentation
+            padding_mask = transforms.apply_segmentation(padding_mask)
+            padding_mask = ~ padding_mask.astype(bool)
+        else:
+            transforms = []
 
         image_shape = image.shape[:2]  # h, w
 
@@ -151,10 +157,11 @@ class COCOInstanceNewBaselineDatasetMapper:
         dataset_dict["image"] = torch.as_tensor(np.ascontiguousarray(image.transpose(2, 0, 1)))
         dataset_dict["padding_mask"] = torch.as_tensor(np.ascontiguousarray(padding_mask))
 
-        if not self.is_train:
-            # USER: Modify this if you want to keep them for some reason.
-            dataset_dict.pop("annotations", None)
-            return dataset_dict
+        # We want to keep them in inference
+        # if not self.is_train:
+        #     # USER: Modify this if you want to keep them for some reason.
+        #     dataset_dict.pop("annotations", None)
+        #     return dataset_dict
 
         if "annotations" in dataset_dict:
             # USER: Modify this if you want to keep them for some reason.
@@ -163,6 +170,8 @@ class COCOInstanceNewBaselineDatasetMapper:
                 anno.pop("keypoints", None)
 
             # USER: Implement additional transformations if you have other types of data
+            
+            
             annos = [
                 utils.transform_instance_annotations(obj, transforms, image_shape)
                 for obj in dataset_dict.pop("annotations")

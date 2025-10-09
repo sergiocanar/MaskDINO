@@ -291,6 +291,8 @@ class MaskDINO(nn.Module):
             # pool once at batch level
             pooled = F.adaptive_avg_pool2d(global_img_features, (1, 1)).flatten(1)  # [B, C]
             
+            # breakpoint()
+            
             mask_pred_results = F.interpolate(
                 mask_pred_results,
                 size=(images.tensor.shape[-2], images.tensor.shape[-1]),
@@ -303,6 +305,8 @@ class MaskDINO(nn.Module):
 
             for i, (mask_cls_result, mask_pred_result, mask_box_result, input_per_image, image_size, queries_feature) in enumerate(
                 zip(mask_cls_results, mask_pred_results, mask_box_results, batched_inputs, images.image_sizes, queries_features)):
+                
+                # breakpoint()
                 
                 height = input_per_image.get("height", image_size[0]) #Og img 
                 width = input_per_image.get("width", image_size[1]) #Og img 
