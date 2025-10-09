@@ -15,7 +15,7 @@ from detectron2.data import transforms as T
 from detectron2.config import get_cfg
 from detectron2.data import DatasetCatalog
 from detectron2.engine import DefaultPredictor
-from detectron2.structures import ImageList, BoxMode
+from detectron2.structures import ImageList, BoxMode, Boxes
 from detectron2.data import build_detection_train_loader
 from detectron2.projects.deeplab import add_deeplab_config
 from detectron2.modeling.postprocessing import sem_seg_postprocess
@@ -77,9 +77,13 @@ def remove_duplicates_n_features(instances):
     return list(no_dups.values())
 
 
-def get_raw_preds(model, image_list, h, w):
+def get_raw_preds(model, image_list, instances, h, w):
     
     with torch.no_grad():
+        
+        if instances is None or len(instances) == 0:
+            return None
+        
         #1. Get the features from the backbone and pixel decoder
         features = model.backbone(image_list.tensor)
         target = None # I dont have masks at this point. The idea is to use available bboxes
@@ -92,11 +96,8 @@ def get_raw_preds(model, image_list, h, w):
         level_masks = [torch.zeros((src.size(0), src.size(2), src.size(3)), device=src.device, dtype=torch.bool) for src in x]
 
         #2. Convert my GT boxes to normnalized cxcywh and project to query embeddings
-        gt_instances = sample["instances"].to(model.device)
+        gt_instances = instances.to(model.device)
         
-        if not hasattr(gt_instances, "gt_boxes"):
-            return None
-
         gt_boxes = gt_instances.gt_boxes.tensor  # [N_objects, 4] in xyxy
         refpoint_embed = box_ops.box_xyxy_to_cxcywh(gt_boxes)  # [N_objects, 4] in cxcywh
         refpoint_embed = refpoint_embed / torch.as_tensor([w, h, w, h], device=model.device)  # Normalize to [0, 1]
@@ -111,7 +112,7 @@ def get_raw_preds(model, image_list, h, w):
         # 3) Build tgt (query features). Use learned query_feat, then slice/pad to match num_queries and our injected boxes
         predictor_head = model.sem_seg_head.predictor  # MaskDINODecoder
         hidden_dim = predictor_head.hidden_dim
-        num_queries = predictor_head.num_queries
+        num_queries = Q_gt
 
         # content features
         if getattr(predictor_head, "learn_tgt", False):
@@ -194,6 +195,31 @@ def get_raw_preds(model, image_list, h, w):
         # upsample to original size
                 
         return pred_masks, pred_logits, pred_bboxes
+
+def bbox_driven_filter(mask_cls, mask_pred, mask_box, gt_classes, score_thresh=0.4, min_area=200):
+    # mask_cls: [Q, num_classes]
+    # mask_pred: [Q, H, W]
+    # mask_box:  [Q, 4]
+    keep_indices = []
+    keep_scores = []
+    keep_classes = []
+
+    for i, cls_id in enumerate(gt_classes):
+        score = mask_cls[i, cls_id].sigmoid()
+        if score > score_thresh:
+            mask_bin = (mask_pred[i] > 0.5)
+            if mask_bin.sum() > min_area:
+                keep_indices.append(i)
+                keep_scores.append(score.item())
+                keep_classes.append(cls_id.item())
+
+    if len(keep_indices) == 0:
+        return None
+
+    keep_indices = torch.tensor(keep_indices, device=mask_cls.device)
+    return mask_pred[keep_indices], mask_box[keep_indices], torch.tensor(keep_classes, device=mask_cls.device), torch.tensor(keep_scores, device=mask_cls.device)
+
+
 
 def instances_to_coco_json(instances, img_id, ann_id):
     """
@@ -399,6 +425,14 @@ for batch in data_loader:
         image = torch.as_tensor(
             aug_input.image.transpose(2, 0, 1), device=model.device
         )  # back to (C,H,W)        
+        
+        instances=None
+        if "instances" in sample and len(sample["instances"]) > 0:
+            instances = sample["instances"].to("cpu")
+            resized_boxes = transforms.apply_box(instances.gt_boxes.tensor.numpy())
+            instances.gt_boxes = Boxes(torch.as_tensor(resized_boxes, dtype=torch.float32))
+            instances._image_size = aug_input.image.shape[:2]
+        
 
         h, w = image.shape[-2:]
 
@@ -409,6 +443,7 @@ for batch in data_loader:
         preds = get_raw_preds(
             model=model,
             image_list=images,
+            instances=instances,
             h=h,
             w=w
         )
@@ -419,6 +454,10 @@ for batch in data_loader:
             continue
         
         raw_masks_preds, raw_classes_preds, raw_bboxes_preds = preds
+        
+        if raw_masks_preds.shape[1] == 0:
+            print(f"No predictions for this image — skipping.")
+            continue
         
         raw_masks_preds = F.interpolate(
                 raw_masks_preds,

@@ -484,9 +484,12 @@ class MaskDINO(nn.Module):
         scores = mask_cls.sigmoid()  # [Q, num_classes]
         labels = torch.arange(self.sem_seg_head.num_classes, device=self.device)\
                     .unsqueeze(0).repeat(self.num_queries, 1).flatten(0, 1)
-
+                    
+        scores_flat = scores.flatten(0, 1)            
+        
         # pick top-K by class scores, then map back to queries
-        scores_per_image, topk_indices = scores.flatten(0, 1).topk(self.test_topk_per_image, sorted=False)
+        k = min(self.test_topk_per_image, scores_flat.numel())
+        scores_per_image, topk_indices = scores.flatten(0, 1).topk(k, sorted=False)
         labels_per_image = labels[topk_indices]
         topk_indices = topk_indices // self.sem_seg_head.num_classes   # <-- query indices [K]
         kept_query_idx = topk_indices
