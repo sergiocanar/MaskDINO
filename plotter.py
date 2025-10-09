@@ -31,14 +31,16 @@ def plot_random_samples(
     img_ids = coco_gt.getImgIds()
     random.shuffle(img_ids)
     selected_ids = img_ids[:num_samples]
+    # selected_ids.append(97026350)
 
     color_map = {
-        "gallbladder": (0.0, 1.0, 1.0),
-        "cystic_duct": (0.0, 1.0, 0.0),
-        "cystic_artery": (1.0, 0.0, 1.0),
-        "cystic_plate": (1.0, 1.0, 0.0),
-        "tool": (0.2, 0.2, 1.0),
-        "background": (0.0, 0.0, 0.0),
+        "cystic_plate":   (248/255, 231/255,  28/255),   # bright yellow
+        "calot_triangle": ( 74/255, 144/255, 226/255),   # blue
+        "cystic_artery":  (218/255,  13/255,  15/255),   # red
+        "cystic_duct":    ( 65/255, 117/255,   6/255),   # dark green
+        "gallbladder":    (126/255, 211/255,  33/255),   # light green
+        "tool":           (245/255, 166/255,  35/255),   # orange
+        "background":     (0.0, 0.0, 0.0),
     }
 
     for img_id in selected_ids:
@@ -122,7 +124,7 @@ if __name__ == "__main__":
     annots2_dir = path_join(data_dir, '201_annotations')
     coco_path = path_join(annots_dir, 'all_seg_201.json')  # GT masks
     coco_bbox_path = path_join(annots2_dir, 'train_annotation_coco.json')  # secondary bboxes
-    output_dir = path_join(this_dir, 'visualizations', 'endoscapes201_compare_new')
+    output_dir = path_join(this_dir, 'visualizations', 'endoscapes201_compare_new_classes')
     os.makedirs(output_dir, exist_ok=True)
 
     plot_random_samples(coco_path, coco_bbox_path, frames_dir, output_dir, num_samples=10)

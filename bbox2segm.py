@@ -11,15 +11,14 @@ from torch.utils.data import DataLoader, SequentialSampler
 from detectron2.data.common import DatasetFromList, MapDataset
 from coco_instance_dataset_mapper import COCOInstanceNewBaselineDatasetMapper
 
-
 import pycocotools.mask as mask_util
 from detectron2.config import get_cfg
 from detectron2.data import DatasetCatalog
 from detectron2.engine import DefaultPredictor
 from detectron2.utils.memory import retry_if_cuda_oom
 from detectron2.projects.deeplab import add_deeplab_config
-from detectron2.modeling.postprocessing import sem_seg_postprocess
 from detectron2.structures import ImageList, BoxMode, Boxes
+from detectron2.modeling.postprocessing import sem_seg_postprocess
 
 from tqdm import tqdm
 from maskdino.utils import box_ops
@@ -191,34 +190,20 @@ def get_raw_preds(model, image_list, instances, h, w):
         pred_logits = predictions_class[-1]     # [B, num_queries, num_classes]
         pred_masks  = predictions_mask[-1]      # [B, num_queries, H/4, W/4]
         pred_bboxes = out_boxes[-1]
-        # upsample to original size
-                
+        
+        # --- Force each prediction to use its known gt_class ---
+        if hasattr(instances, "gt_classes"):
+            gt_classes = instances.gt_classes.to(pred_logits.device)
+            num_classes = pred_logits.shape[-1]
+
+            # Build a one-hot tensor: [Q_gt, num_classes]
+            forced_logits = torch.full_like(pred_logits[0], fill_value=-10.0)  # strong negative bias
+            forced_logits[torch.arange(len(gt_classes)), gt_classes] = 10.0     # strong positive for known class
+
+            # Overwrite logits (batch dimension is 1 here)
+            pred_logits = forced_logits.unsqueeze(0)
+                        
         return pred_masks, pred_logits, pred_bboxes
-
-def bbox_driven_filter(mask_cls, mask_pred, mask_box, gt_classes, score_thresh=0.4, min_area=200):
-    # mask_cls: [Q, num_classes]
-    # mask_pred: [Q, H, W]
-    # mask_box:  [Q, 4]
-    keep_indices = []
-    keep_scores = []
-    keep_classes = []
-
-    for i, cls_id in enumerate(gt_classes):
-        score = mask_cls[i, cls_id].sigmoid()
-        if score > score_thresh:
-            mask_bin = (mask_pred[i] > 0.5)
-            if mask_bin.sum() > min_area:
-                keep_indices.append(i)
-                keep_scores.append(score.item())
-                keep_classes.append(cls_id.item())
-
-    if len(keep_indices) == 0:
-        return None
-
-    keep_indices = torch.tensor(keep_indices, device=mask_cls.device)
-    return mask_pred[keep_indices], mask_box[keep_indices], torch.tensor(keep_classes, device=mask_cls.device), torch.tensor(keep_scores, device=mask_cls.device)
-
-
 
 def instances_to_coco_json(instances, img_id, ann_id):
     """
@@ -484,7 +469,7 @@ for batch in data_loader:
             instance_r, top_q_idx = retry_if_cuda_oom(model.instance_inference)(
                 mask_cls_result, mask_pred_result, mask_box_result
             )
-
+            
             ann_id = f'{img_id}0'
             ann_id = int(ann_id)
 
