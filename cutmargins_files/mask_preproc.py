@@ -1,16 +1,23 @@
 import os
 import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import cv2
 import json
+import argparse
 import numpy as np
-import pandas as pd
 from tqdm import tqdm
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils import load_json
 from pycocotools.coco import COCO
 from os.path import join as path_join
 from pycocotools import mask as mask_utils
 
+parser = argparse.ArgumentParser()
+
+parser.add_argument("--annots_dir", type=str, default="annotations")
+parser.add_argument("--split", type=str, default="train")
+
+args = parser.parse_args()
 
 def create_directory_if_not_exists(path):
     if not os.path.exists(path):
@@ -147,13 +154,7 @@ def prepocess_masks(base_dir: str, cutted_dir: str,coco_json_dict: dict, coco_ob
             diff_dict[file_name] = [diff_h, diff_w]    
             pbar.update(1)
             
-    
-    # save json
-    json_final_path = path_join(output_path, 'debug.json')
-    with open(json_final_path, 'w') as f:
-        json.dump(diff_dict, f, indent=4)
-    
-    json_final_path_masks = path_join(output_path, 'train_annotation_coco.json')
+    json_final_path_masks = path_join(output_path, f'{args.split}_annotation_coco.json')
     with open(json_final_path_masks, 'w') as out_f:
         json.dump(new_mask_dict, out_f, indent=4)
     
@@ -280,14 +281,14 @@ if __name__ == "__main__":
     frames_cutmargins_dir = path_join(endoscapes_cutmargins_dir, 'frames')
         
     #json paths
-    annots_path = path_join(endoscapes_dir, 'annotations_sam_extended')
-    coco_json_path = path_join(annots_path, 'train_annotation_coco.json')
+    annots_path = path_join(endoscapes_dir, args.annots_dir)
+    coco_json_path = path_join(annots_path, f'{args.split}_annotation_coco.json')
 
     #Load coco annotations
     coco_dict = load_json(coco_json_path)
     coco_obj = COCO(coco_json_path)
 
-    output_dir = path_join(endoscapes_cutmargins_dir, 'annotations_sam_extended')            
+    output_dir = path_join(endoscapes_cutmargins_dir, args.annots_dir)            
     create_directory_if_not_exists(output_dir)
 
     #Preprocess masks
