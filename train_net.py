@@ -87,7 +87,7 @@ def metadata_from_json(json_file):
     return metadata
 
 
-def register_surgical_dataset(cfg):
+def register_surgical_dataset(cfg, annot_dir):
     print(cfg.DATASETS.TRAIN)
     dataset_name = cfg.DATASETS.TRAIN[0].split("_")[0]
     this_dir = os.path.dirname(os.path.abspath(__file__))
@@ -95,8 +95,8 @@ def register_surgical_dataset(cfg):
 
     if dataset_name == "endoscapes":
         dataset_path = path_join(dataset_path, "endoscapes")
+        annotation_path = path_join(dataset_path, annot_dir)
         image_root = path_join(dataset_path, "frames")
-        annotation_path = path_join(dataset_path, "201_annotations")
         metadata = metadata_from_json(
             path_join(
                 annotation_path,
@@ -115,8 +115,8 @@ def register_surgical_dataset(cfg):
     
     elif dataset_name == "endoscapes-cutted":
         dataset_path = path_join(dataset_path, "endoscapes_cutmargins")
+        annotation_path = path_join(dataset_path, annot_dir)
         image_root = path_join(dataset_path, "frames")
-        annotation_path = path_join(dataset_path, "annotations")
         metadata = metadata_from_json(
             path_join(
                 annotation_path,
@@ -465,7 +465,7 @@ def setup(args):
 
 def main(args):
     cfg = setup(args)
-    register_surgical_dataset(cfg)
+    register_surgical_dataset(cfg, args.annots_dir)
     print("Command cfg:", cfg)
     if args.eval_only:
         model = Trainer.build_model(cfg)
@@ -490,6 +490,7 @@ if __name__ == "__main__":
     parser = default_argument_parser()
     parser.add_argument("--eval_only", action="store_true")
     parser.add_argument("--EVAL_FLAG", type=int, default=1)
+    parser.add_argument("--annots_dir", type=str, default='annotations')
     args = parser.parse_args()
     # random port
     port = random.randint(1000, 20000)

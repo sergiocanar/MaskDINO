@@ -70,7 +70,7 @@ MODEL:
       OBJECT_MASK_THRESHOLD: 0.25
 DATASETS:
   TRAIN: ("endoscapes_train",)
-  TEST: ("endoscapes_test",)
+  TEST: ("endoscapes_val",)
 SOLVER:
   AMP:
     ENABLED: True
