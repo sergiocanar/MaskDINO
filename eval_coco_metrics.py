@@ -50,7 +50,7 @@ def main():
 
     # Set IoU thresholds and max detections
     # coco_eval.params.iouThrs = np.array(args.iou_thresholds)
-    coco_eval.params.maxDets = args.max_dets
+    # coco_eval.params.maxDets = args.max_dets
 
     # Run evaluation
     coco_eval.evaluate()

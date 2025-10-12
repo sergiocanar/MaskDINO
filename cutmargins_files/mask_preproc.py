@@ -40,10 +40,14 @@ def prepocess_masks(base_dir: str, cutted_dir: str,coco_json_dict: dict, coco_ob
         #Iterate over info dict
         for img_info in img_info_lt:
             
-            #Get relevant information
-            video_name = img_info['video_id']            
-            h,w = img_info['height'], img_info['width']
             file_name = img_info['file_name']
+            
+            if 'video_id' not in list(img_info.keys()):
+                video_name = int(file_name.split('_')[0])
+            else:
+                video_name = img_info['video_id']            
+            #Get relevant information
+            h,w = img_info['height'], img_info['width']
             
             new_img_info = {
                 "id": img_info['id'],
@@ -51,7 +55,7 @@ def prepocess_masks(base_dir: str, cutted_dir: str,coco_json_dict: dict, coco_ob
                 "height": None,
                 "width": None,
                 "video_name": video_name,
-                "frame_id": img_info['frame_id']
+                "frame_id": img_info['id']
             }
             
             #Key for dictionary
@@ -86,12 +90,16 @@ def prepocess_masks(base_dir: str, cutted_dir: str,coco_json_dict: dict, coco_ob
             
             for ann in anns:
                 
-                
+                if "iscrowd" not in list(ann.keys()):
+                    is_crowd = 0
+                else: 
+                    is_crowd = ann['iscrowd']
+                    
                 new_ann = {
                     "id": ann['id'],
                     "image_id": ann['image_id'],
                     "segmentation": None,
-                    "iscrowd": ann['iscrowd'],
+                    "iscrowd": is_crowd,
                     "bbox": None,
                     "area": None,
                     "category_id": ann['category_id']
@@ -106,14 +114,13 @@ def prepocess_masks(base_dir: str, cutted_dir: str,coco_json_dict: dict, coco_ob
                     # breakpoint()
                 
                 mask[segm_mask == 1] = ann['category_id'] 
-                
-                # breakpoint()
-                
+                                
+                new_frame, l, w, b, h = filter_black(image=img) 
+                #Cut the mask
+                new_mask = mask[l:l+w, b:b+h]
                 # -------------- CHALLENGE DATA ---------------
                 if not video_name in ['video_138', 'video_197', 'video_227']:  #General case
-                    new_frame, l, w, b, h = filter_black(image=img) 
-                    #Cut the mask
-                    new_mask = mask[l:l+w, b:b+h]
+                    pass
                 else:
                     new_frame, top, bottom, x_start, x_end = filter_black_color(image=img)
                     new_mask = mask[top:bottom, x_start:x_end]       
@@ -145,9 +152,7 @@ def prepocess_masks(base_dir: str, cutted_dir: str,coco_json_dict: dict, coco_ob
             
             #Get shapes for comparison
             new_h, new_w = new_mask.shape            
-                      
-
-            
+                    
             diff_h = abs(new_h - h_targ)
             diff_w = abs(new_w - w_targ)
             
@@ -157,6 +162,8 @@ def prepocess_masks(base_dir: str, cutted_dir: str,coco_json_dict: dict, coco_ob
     json_final_path_masks = path_join(output_path, f'{args.split}_annotation_coco.json')
     with open(json_final_path_masks, 'w') as out_f:
         json.dump(new_mask_dict, out_f, indent=4)
+        
+    print(f'Cutted frames json saved to: {json_final_path_masks}')
     
 def filter_black(image):
     binary_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
