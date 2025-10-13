@@ -89,31 +89,52 @@ def organize_pred_pascal(gt_keys, preds, task, num_classes):
             print("{} not predicted".format(img_name))
             continue
         pred_image = preds[img_name]["instances"]
-        breakpoint()
         
-        pred_image.sort(key=lambda x: max(x[f"{task}_score_dist"]), reverse=True)
+        pred_image.sort(key=lambda x: x[f"{task}_score_dist"], reverse=True)
 
         if not len(pred_image):
             continue
-
+        
         for this_box in pred_image:
-            box, segment, prob_task = (
+            box, segment, score, category_id = (
                 this_box["bbox"],
                 this_box["segment"],
-                this_box[f"{task}_score_dist"],
+                float(this_box[f"{task}_score_dist"]),
+                this_box["category_id"]
             )
+
             x1, y1, x2, y2 = box
             if x1 > 1 or y1 > 1 or x2 > 1 or y2 > 1:
-                # If the box is not normalized, normalize it
-                x1 = x1 / im_w
-                y1 = y1 / im_h
-                x2 = x2 / im_w
-                y2 = y2 / im_h
+                x1, y1, x2, y2 = x1 / im_w, y1 / im_h, x2 / im_w, y2 / im_h
+
             new_box = [y1, x1, y2, x2]
-            pred_bboxes[new_key].extend([new_box for _ in range(num_classes)])
-            pred_segments[new_key].extend([segment for _ in range(num_classes)])
-            pred_scores[new_key].extend(prob_task)
-            pred_labels[new_key].extend(list(range(1, num_classes + 1)))
+            
+            cls_id = this_box.get("category_id", 1)
+
+            pred_bboxes[new_key].append(new_box)
+            pred_segments[new_key].append(segment)
+            pred_scores[new_key].append(float(this_box[f"{task}_score_dist"]))
+            pred_labels[new_key].append(int(cls_id))
+
+        # This loop is when the model outputs an array of class logits for the mask class.
+        # for this_box in pred_image:
+        #     box, segment, prob_task = (
+        #         this_box["bbox"],
+        #         this_box["segment"],
+        #         this_box[f"{task}_score_dist"],
+        #     )
+        #     x1, y1, x2, y2 = box
+        #     if x1 > 1 or y1 > 1 or x2 > 1 or y2 > 1:
+        #         # If the box is not normalized, normalize it
+        #         x1 = x1 / im_w
+        #         y1 = y1 / im_h
+        #         x2 = x2 / im_w
+        #         y2 = y2 / im_h
+        #     new_box = [y1, x1, y2, x2]
+        #     pred_bboxes[new_key].extend([new_box for _ in range(num_classes)])
+        #     pred_segments[new_key].extend([segment for _ in range(num_classes)])
+        #     pred_scores[new_key].extend(prob_task)
+        #     pred_labels[new_key].extend(list(range(1, num_classes + 1)))
 
     detection = [pred_bboxes, pred_labels, pred_scores, pred_segments]
     return detection

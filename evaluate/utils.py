@@ -402,7 +402,7 @@ def getrealbox(boxes, box):
 def filter_preds(preds_list, method, parameters):
     if method == "all":
         return [p for p in preds_list if p["score"] > 0]
-
+    
     if "topk" in method:
         preds_list.sort(key=lambda x: x["score"], reverse=True)
 
@@ -459,6 +459,8 @@ def format_instances(instances, width, height, segmentation=False, num_classes=N
                 if num_classes != None and num_classes > 1:
                     remaining = (1 - instance["score"]) / (num_classes - 1)
                     vector = [remaining] * num_classes
+                    
+                    breakpoint()
 
                     # asignar el score a su categoría
                     vector[instance["category_id"]] = instance["score"]
@@ -479,9 +481,12 @@ def format_instances(instances, width, height, segmentation=False, num_classes=N
         if segmentation:
             segment = instance["segmentation"]
             this_instance["segment"] = segment
+            
+        #Just for MaskDINO 
+        this_instance["category_id"] = instance["category_id"]
 
         formated_instances.append(this_instance)
-
+    
     return formated_instances
 
 

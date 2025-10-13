@@ -24,7 +24,7 @@ def eval_segmentation(task, coco_anns, preds, img_ann_dict, **kwargs):
     Returns:
         tuple: Total ground truth IoU and a dictionary with evaluation metrics (IoU and per-class IoUs).
     """
-
+    
     # Determine the categories for evaluation
     if "instruments_categories" in coco_anns:
         cats = coco_anns["instruments_categories"]
@@ -95,9 +95,8 @@ def eval_segmentation(task, coco_anns, preds, img_ann_dict, **kwargs):
         if image_preds:
             instances = []
             for pred in image_preds:
-                logits = pred["instruments_score_dist"]
-                category = np.argmax(logits)
-                score = logits[category]
+                score = pred["instruments_score_dist"]
+                category = pred['category_id']
                 segmentation = pred["segment"]
                 instances.append(
                     {

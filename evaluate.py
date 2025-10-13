@@ -9,178 +9,8 @@ from evaluate.main_eval import eval_task
 from pycocotools.cocoeval import COCOeval
 from evaluate.utils import load_json, read_detectron2_output
 
-def run_coco_eval(gt_path, preds, eval_type='segm'):
-    coco_gt = COCO(gt_path)
-
-    if isinstance(preds, dict) and "annotations" in preds:
-        preds = preds["annotations"]
-
-    # Clean any extra fields
-    for p in preds:
-        for k in ["decoder_out", "score_dist", "mask_embd", "global_ft"]:
-            p.pop(k, None)
-        if eval_type == "segm":
-            p.pop("bbox", None)
-
-    coco_dt = coco_gt.loadRes(preds)
-    coco_eval = COCOeval(coco_gt, coco_dt, eval_type)
-    coco_eval.params.iouThrs = np.linspace(0.5, 0.95, 10)
-    coco_eval.params.maxDets = [1, 10, 100]
-    coco_eval.evaluate()
-    coco_eval.accumulate()
-    coco_eval.summarize()
-
-    names = [
-        "AP@[.5:.95]", "AP@0.5", "AP@0.75",
-        "AP_small", "AP_medium", "AP_large",
-        "AR@[.5:.95]_1", "AR@[.5:.95]_10", "AR@[.5:.95]_100",
-        "AR_small", "AR_medium", "AR_large"
-    ]
-    metrics = {name: round(float(val) * 100, 3) for name, val in zip(names, coco_eval.stats)}
-    return metrics
-
-def format_horizontal_table(metrics_dict, n_cols=6, default_category="Overall"):
-    assert n_cols % 3 == 0, "n_cols debe ser múltiplo de 3"
-
-    formatted = []
-    for k, v in metrics_dict.items():
-        parts = k.rsplit("-", 2)
-        if len(parts) == 3:
-            category, metric, _ = parts
-        elif len(parts) == 2:
-            metric, _ = parts
-            category = default_category
-        else:
-            category = default_category
-            metric = k.replace(f"-{default_category}", "")
-        formatted.append([category, metric, v])
-
-    row_len = n_cols // 3
-    results_2d = [formatted[i : i + row_len] for i in range(0, len(formatted), row_len)]
-    results_2d = [sum(row, []) for row in results_2d]
-    headers = ["Category", "Metric", "Value"] * (n_cols // 3)
-
-    return tabulate(
-        results_2d, headers=headers, tablefmt="pipe", floatfmt=".3f", numalign="left"
-    )
-
-
-def main(coco_ann_path, pred_path, tasks, metrics, output_dir, sufix, masks_path):
-    # Load coco anns and preds
-    coco_anns = load_json(coco_ann_path)
-    preds = load_json(pred_path) if type(pred_path) == str else pred_path
-    datasets = [img.get("dataset") for img in coco_anns["images"]]
-    if not any(dataset is None for dataset in datasets):
-        datasets = sorted(list(set(datasets)), key=lambda x: x.lower())
-    else:
-        datasets = False
-    all_metrics = {}
-    for task, metric in zip(tasks, metrics):
-        task_eval, aux_metrics = eval_task(task, metric, coco_anns, preds, masks_path)
-        aux_metrics = dict(
-            zip(aux_metrics.keys(), map(lambda x: round(x, 8), aux_metrics.values()))
-        )
-        if datasets:
-            print("{} task {}: {}".format(task, metric, round(task_eval, 8)))
-            for dataset in datasets:
-                dataset_metrics = {k: v for k, v in aux_metrics.items() if dataset in k}
-                general_metrics = {}
-                category_metrics = {}
-
-                modified_dataset = (
-                    dataset.replace("-", "_") if "-" in dataset else dataset
-                )
-
-                for k, v in dataset_metrics.items():
-                    prefix = k.replace(f"-{dataset}", "")
-                    if modified_dataset != dataset:
-                        k = k.replace(dataset, modified_dataset)
-                    if prefix.count("-") >= 1:
-                        category_metrics[k] = v
-                    else:
-                        general_metrics[k] = v
-
-                if general_metrics:
-                    print(f"\nMétricas generales para dataset: {dataset}")
-                    print(
-                        format_horizontal_table(
-                            general_metrics, n_cols=6, default_category="Overall"
-                        )
-                    )
-
-                if category_metrics:
-                    print(f"\nMétricas por categoría para dataset: {dataset}")
-                    print(format_horizontal_table(category_metrics, n_cols=6))
-        else:
-            print(
-                "{} task {}: {} {}".format(
-                    task, metric, round(task_eval, 8), aux_metrics
-                )
-            )
-        final_metrics = {metric: round(task_eval, 8)}
-        final_metrics.update(aux_metrics)
-        all_metrics[task] = final_metrics
-
-        if metric in ["mAP@0.5IoU_box", "detection"]:
-            coco_type = "bbox"
-        elif metric in ["mAP@0.5IoU_segm", "inst_segmentation", "segmentation"]:
-            coco_type = "segm"
-        else:
-            coco_type = None
-
-        if coco_type:
-            print(f"\n Running official COCO evaluation ({coco_type})...")
-            coco_metrics = run_coco_eval(coco_ann_path, preds, coco_type)
-            all_metrics[f"COCO_{coco_type}"] = coco_metrics
-
-        if output_dir is not None and sufix is not None:
-            if metric in ["mAP@0.5IoU_box", "detection"]:
-                met_suf = "det"
-            elif metric in ["mAP@0.5IoU_segm", "inst_segmentation"]:
-                met_suf = "ins_seg"
-            elif metric in ["mIoU", "sem_segmentation"]:
-                met_suf = "sem_seg"
-            elif metric == "mIoU_mAP@0.5":
-                met_suf = "seg"
-            else:
-                met_suf = "class"
-            os.makedirs(output_dir, exist_ok=True)
-            if os.path.isfile(os.path.join(output_dir, f"metrics_{met_suf}.json")):
-                with open(
-                    os.path.join(output_dir, f"metrics_{met_suf}.json"), "r"
-                ) as f:
-                    save_json = json.load(f)
-                    save_json[sufix] = all_metrics[task]
-            else:
-                save_json = {sufix: all_metrics[task]}
-            with open(os.path.join(output_dir, f"metrics_{met_suf}.json"), "w") as f:
-                json.dump(save_json, f, indent=4)
-
-            excel_file = os.path.join(output_dir, f"metrics_{met_suf}.xlsx")
-            if os.path.exists(excel_file):
-                existing_df = pd.read_excel(excel_file)
-            else:
-                existing_df = pd.DataFrame()
-
-            new_row = {
-                k: v
-                for k, v in [("Experiments", sufix)] + list(all_metrics[task].items())
-                if k == "Experiments" or v > 0
-            }
-            new_df = pd.DataFrame([new_row])
-
-            # updated_df = existing_df.append(new_df, ignore_index=True)
-            updated_df = pd.concat([existing_df, new_df], ignore_index=True)
-            with pd.ExcelWriter(excel_file, engine="xlsxwriter") as writer:
-                updated_df.to_excel(writer, index=False)
-    overall_metric = np.mean(
-        [v[m] for v, m in zip(list(all_metrics.values()), metrics)]
-    )
-    print("Overall Metric: {}".format(overall_metric))
-    return overall_metric
-
-
-if __name__ == "__main__":
+def eval_parser():
+    
     parser = argparse.ArgumentParser(description="Evaluation parser")
     parser.add_argument(
         "--coco-ann-path",
@@ -193,6 +23,7 @@ if __name__ == "__main__":
         "--pred-path", default=None, type=str, required=True, help="Path to predictions"
     )
     parser.add_argument("--filter", action="store_true", help="Filter predictions")
+    parser.add_argument("--coco", action="store_true", help="Compute COCO metrics")
     parser.add_argument(
         "--tasks", nargs="+", help="Tasks to be evaluated", default=None, required=True
     )
@@ -249,7 +80,226 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     print(args)
+    
+    return args
 
+def run_coco_eval(gt_path, preds, eval_type='segm'):
+    coco_gt = COCO(gt_path)
+
+    if isinstance(preds, dict) and "annotations" in preds:
+        preds = preds["annotations"]
+
+    # Clean any extra fields as sanity checks. I only want to evaluate segmentation @ the moment 
+    for p in preds:
+        for k in ["decoder_out", "score_dist", "mask_embd", "global_ft"]:
+            p.pop(k, None)
+        if eval_type == "segm":
+            p.pop("bbox", None)
+    
+    #Standard COCO evaluarion
+    coco_dt = coco_gt.loadRes(preds)
+    coco_eval = COCOeval(coco_gt, coco_dt, eval_type)
+    coco_eval.params.iouThrs = np.linspace(0.5, 0.95, 10)
+    coco_eval.params.maxDets = [1, 10, 100]
+    coco_eval.evaluate()
+    coco_eval.accumulate()
+    coco_eval.summarize()
+
+    names = [
+        "AP@[.5:.95]", "AP@0.5", "AP@0.75",
+        "AP_small", "AP_medium", "AP_large",
+        "AR@[.5:.95]_1", "AR@[.5:.95]_10", "AR@[.5:.95]_100",
+        "AR_small", "AR_medium", "AR_large"
+    ]
+    metrics = {name: round(float(val) * 100, 3) for name, val in zip(names, coco_eval.stats)}
+    return metrics
+
+def format_horizontal_table(metrics_dict, n_cols=6, default_category="Overall"):
+    assert n_cols % 3 == 0, "n_cols debe ser múltiplo de 3"
+
+    formatted = []
+    for k, v in metrics_dict.items():
+        parts = k.rsplit("-", 2)
+        if len(parts) == 3:
+            category, metric, _ = parts
+        elif len(parts) == 2:
+            metric, _ = parts
+            category = default_category
+        else:
+            category = default_category
+            metric = k.replace(f"-{default_category}", "")
+        formatted.append([category, metric, v])
+
+    row_len = n_cols // 3
+    results_2d = [formatted[i : i + row_len] for i in range(0, len(formatted), row_len)]
+    results_2d = [sum(row, []) for row in results_2d]
+    headers = ["Category", "Metric", "Value"] * (n_cols // 3)
+
+    return tabulate(
+        results_2d, headers=headers, tablefmt="pipe", floatfmt=".3f", numalign="left"
+    )
+
+
+def main(coco_ann_path: str, pred_path:str, compute_coco: bool, preds: dict, tasks: list, metrics: list, output_dir: str, sufix: str, masks_path: str = None):
+    
+    '''
+    Main function for evaluation different segmentation tasks. 
+    
+    This function takes a COCO annotation path. Computes COCO bbox or segmentation metrics as user defined.
+    
+    Arguments:
+    - coco_ann_path (str): Path to the COCO annotation path. Needs to be .json
+    - pred_path (str): Path to the COCO predictions path. Needs to be .json. In this case Im using MaskDINO outputs
+    - preds (dict): This preds are a dictionary extracted from the Detectron2output. This is necessary to have compatibility for metrics calculation
+    - tasks (list): List of tasks to be completed.
+    - metrics (list): List of metrics to be completed.
+    - output_dir (str): Output directory to save metrics files.
+    - sufix (str): Parameter specific for metrics calculation.
+    - masks_path (str): Path to masks if available.
+    
+    '''
+    
+    # Load coco anns and preds
+    coco_anns = load_json(coco_ann_path)
+    preds_raw = load_json(pred_path) if type(pred_path) == str else pred_path
+    all_metrics = {}
+    
+    if compute_coco:        
+        if "mAP@0.5IoU_box" in metrics or "detection" in metrics:
+                coco_type = "bbox"
+        elif "mAP@0.5IoU_segm" in metrics or "inst_segmentation" in metrics or "segmentation" in metrics:
+                coco_type = "segm"
+        else:
+                coco_type = None
+
+        if coco_type:
+            print(f"\n Running official COCO evaluation ({coco_type})...")
+            print(f"--------------------------------------------------------")
+            coco_metrics = run_coco_eval(coco_ann_path, preds_raw, coco_type)
+            all_metrics[f"COCO_{coco_type}"] = coco_metrics
+    else:
+        print('Skipping COCO metrics computation...')
+    
+    datasets = [img.get("dataset") for img in coco_anns["images"]]
+    
+    if not any(dataset is None for dataset in datasets):
+        datasets = sorted(list(set(datasets)), key=lambda x: x.lower())
+    else:
+        datasets = False
+    for task, metric in zip(tasks, metrics):
+        task_eval, aux_metrics = eval_task(task, metric, coco_anns, preds, masks_path)
+        aux_metrics = dict(
+            zip(aux_metrics.keys(), map(lambda x: round(x, 8), aux_metrics.values()))
+        )
+        if datasets:
+            print("{} task {}: {}".format(task, metric, round(task_eval, 8)))
+            for dataset in datasets:
+                dataset_metrics = {k: v for k, v in aux_metrics.items() if dataset in k}
+                general_metrics = {}
+                category_metrics = {}
+
+                modified_dataset = (
+                    dataset.replace("-", "_") if "-" in dataset else dataset
+                )
+
+                for k, v in dataset_metrics.items():
+                    prefix = k.replace(f"-{dataset}", "")
+                    if modified_dataset != dataset:
+                        k = k.replace(dataset, modified_dataset)
+                    if prefix.count("-") >= 1:
+                        category_metrics[k] = v
+                    else:
+                        general_metrics[k] = v
+
+                if general_metrics:
+                    print(f"\nMétricas generales para dataset: {dataset}")
+                    print(
+                        format_horizontal_table(
+                            general_metrics, n_cols=6, default_category="Overall"
+                        )
+                    )
+
+                if category_metrics:
+                    print(f"\nMétricas por categoría para dataset: {dataset}")
+                    print(format_horizontal_table(category_metrics, n_cols=6))
+        else:
+            print(
+                "{} task {}: {} {}".format(
+                    task, metric, round(task_eval, 8), aux_metrics
+                )
+            )
+        final_metrics = {metric: round(task_eval, 8)}
+        final_metrics.update(aux_metrics)
+        all_metrics[task] = final_metrics
+
+        if output_dir is not None and sufix is not None:
+            if metric in ["mAP@0.5IoU_box", "detection"]:
+                met_suf = "det"
+            elif metric in ["mAP@0.5IoU_segm", "inst_segmentation"]:
+                met_suf = "ins_seg"
+            elif metric in ["mIoU", "sem_segmentation"]:
+                met_suf = "sem_seg"
+            elif metric == "mIoU_mAP@0.5":
+                met_suf = "seg"
+            else:
+                met_suf = "class"
+            os.makedirs(output_dir, exist_ok=True)
+            if os.path.isfile(os.path.join(output_dir, f"metrics_{met_suf}.json")):
+                with open(
+                    os.path.join(output_dir, f"metrics_{met_suf}.json"), "r"
+                ) as f:
+                    save_json = json.load(f)
+                    save_json[sufix] = all_metrics[task]
+            else:
+                save_json = {sufix: all_metrics[task]}
+            with open(os.path.join(output_dir, f"metrics_{met_suf}.json"), "w") as f:
+                json.dump(save_json, f, indent=4)
+
+            excel_file = os.path.join(output_dir, f"metrics_{met_suf}.xlsx")
+            if os.path.exists(excel_file):
+                existing_df = pd.read_excel(excel_file)
+            else:
+                existing_df = pd.DataFrame()
+
+            new_row = {
+                k: v
+                for k, v in [("Experiments", sufix)] + list(all_metrics[task].items())
+                if k == "Experiments" or v > 0
+            }
+            new_df = pd.DataFrame([new_row])
+
+            # updated_df = existing_df.append(new_df, ignore_index=True)
+            updated_df = pd.concat([existing_df, new_df], ignore_index=True)
+            with pd.ExcelWriter(excel_file, engine="xlsxwriter") as writer:
+                updated_df.to_excel(writer, index=False)    
+    if compute_coco:
+        coco_metrics = all_metrics.get('COCO_segm', {})
+        if 'AP@[.5:.95]' in coco_metrics:
+            overall_metric = coco_metrics['AP@[.5:.95]']
+        else:
+            print("⚠️ 'AP@[.5:.95]' not found in COCO metrics.")
+            overall_metric = np.nan
+    else:
+        try:
+            overall_metric = np.mean([
+                v[m] for v, m in zip(list(all_metrics.values()), metrics)
+                if m in v  # safeguard for missing keys
+            ])
+        except Exception as e:
+            print(f"Error computing overall_metric: {e}")
+            overall_metric = np.nan
+
+    print(f"Overall Metric: {overall_metric:.4f}")
+
+    return overall_metric
+
+
+if __name__ == "__main__":
+    
+    #Arguments used for evaluation
+    args = eval_parser()
+
+    
     assert len(args.tasks) == len(args.metrics), f"{args.tasks} {args.metrics}"
     preds = args.pred_path
     if args.filter:
@@ -297,11 +347,13 @@ if __name__ == "__main__":
             breakpoint()
         output_dir = args.output_path
     main(
-        args.coco_ann_path,
-        preds,
-        args.tasks,
-        args.metrics,
-        output_dir,
-        sufix,
-        args.masks_path,
+        coco_ann_path=args.coco_ann_path,
+        pred_path=args.pred_path,
+        compute_coco=args.coco,
+        preds=preds,
+        tasks=args.tasks,
+        metrics=args.metrics,
+        output_dir=output_dir,
+        sufix=sufix,
+        masks_path=args.masks_path,
     )
