@@ -89,6 +89,8 @@ def organize_pred_pascal(gt_keys, preds, task, num_classes):
             print("{} not predicted".format(img_name))
             continue
         pred_image = preds[img_name]["instances"]
+        breakpoint()
+        
         pred_image.sort(key=lambda x: max(x[f"{task}_score_dist"]), reverse=True)
 
         if not len(pred_image):

@@ -1,12 +1,43 @@
-import argparse
 import os
 import json
-import pandas as pd
+import argparse
 import numpy as np
-from evaluate.main_eval import eval_task
-from evaluate.utils import load_json, read_detectron2_output
+import pandas as pd
 from tabulate import tabulate
+from pycocotools.coco import COCO
+from evaluate.main_eval import eval_task
+from pycocotools.cocoeval import COCOeval
+from evaluate.utils import load_json, read_detectron2_output
 
+def run_coco_eval(gt_path, preds, eval_type='segm'):
+    coco_gt = COCO(gt_path)
+
+    if isinstance(preds, dict) and "annotations" in preds:
+        preds = preds["annotations"]
+
+    # Clean any extra fields
+    for p in preds:
+        for k in ["decoder_out", "score_dist", "mask_embd", "global_ft"]:
+            p.pop(k, None)
+        if eval_type == "segm":
+            p.pop("bbox", None)
+
+    coco_dt = coco_gt.loadRes(preds)
+    coco_eval = COCOeval(coco_gt, coco_dt, eval_type)
+    coco_eval.params.iouThrs = np.linspace(0.5, 0.95, 10)
+    coco_eval.params.maxDets = [1, 10, 100]
+    coco_eval.evaluate()
+    coco_eval.accumulate()
+    coco_eval.summarize()
+
+    names = [
+        "AP@[.5:.95]", "AP@0.5", "AP@0.75",
+        "AP_small", "AP_medium", "AP_large",
+        "AR@[.5:.95]_1", "AR@[.5:.95]_10", "AR@[.5:.95]_100",
+        "AR_small", "AR_medium", "AR_large"
+    ]
+    metrics = {name: round(float(val) * 100, 3) for name, val in zip(names, coco_eval.stats)}
+    return metrics
 
 def format_horizontal_table(metrics_dict, n_cols=6, default_category="Overall"):
     assert n_cols % 3 == 0, "n_cols debe ser múltiplo de 3"
@@ -89,6 +120,18 @@ def main(coco_ann_path, pred_path, tasks, metrics, output_dir, sufix, masks_path
         final_metrics = {metric: round(task_eval, 8)}
         final_metrics.update(aux_metrics)
         all_metrics[task] = final_metrics
+
+        if metric in ["mAP@0.5IoU_box", "detection"]:
+            coco_type = "bbox"
+        elif metric in ["mAP@0.5IoU_segm", "inst_segmentation", "segmentation"]:
+            coco_type = "segm"
+        else:
+            coco_type = None
+
+        if coco_type:
+            print(f"\n Running official COCO evaluation ({coco_type})...")
+            coco_metrics = run_coco_eval(coco_ann_path, preds, coco_type)
+            all_metrics[f"COCO_{coco_type}"] = coco_metrics
 
         if output_dir is not None and sufix is not None:
             if metric in ["mAP@0.5IoU_box", "detection"]:
