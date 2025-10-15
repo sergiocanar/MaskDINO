@@ -1,109 +1,58 @@
-# import os 
-# import json
-# import argparse
-# from utils import load_json, save_json
-# from glob import glob
-# from os.path import join as path_join
+import os
+from glob import glob
+from os.path import join as path_join
+from utils import join_coco_jsons, load_json, create_symlink
 
-# def make_combined_trained_json(all_json: dict, train_json: dict, val_json: dict, test_json: dict):
-#     # Collect all image file names in each split
-#     val_files = {img["file_name"] for img in val_json["images"]}
-#     test_files = {img["file_name"] for img in test_json["images"]}
-#     train_files = {img["file_name"] for img in train_json["images"]}
+def create_sym_links_endo2023(file_name_lt: list, src_path: str, dest_path: str):
+    """
+    Create symbolic links for a list of frame filenames.
 
-#     final_dict = {
-#         "images": [],
-#         "annotations": [],
-#         "categories": all_json["categories"]
-#     }
+    Args:
+        file_name_lt (list): list of file names (e.g. ["120_69225.jpg", ...])
+        src_path (str): directory where original frames are located
+        dest_path (str): directory where symbolic links will be created
+    """
+    os.makedirs(dest_path, exist_ok=True)
 
-#     # Add all training images and annotations
-#     final_dict["images"].extend(train_json["images"])
-#     final_dict["annotations"].extend(train_json["annotations"])
+    for file_ in file_name_lt:
+        src_frame = path_join(src_path, file_)
+        dst_frame = path_join(dest_path, file_)
 
-#     # Add remaining images (those not in val or test)
-#     val_test_files = val_files.union(test_files)
+        if not os.path.exists(src_frame):
+            print(f"Source not found: {src_frame}")
+            continue
 
-#     for img_dict in all_json["images"]:
-#         fname = img_dict["file_name"]
-#         if fname not in val_test_files and fname not in train_files:
-#             final_dict["images"].append(img_dict)
-#             # Add corresponding annotations from all_json
-#             img_id = img_dict["id"]
-#             anns = [a for a in all_json["annotations"] if a["image_id"] == img_id]
-#             final_dict["annotations"].extend(anns)
-
-#     return final_dict
-
-
-
-# def indent_json(input_json_path, output_json_path):
-#     """
-#     Reformat a JSON file with indentation for better readability.
-
-#     Parameters:
-#     - input_json_path: path to the input JSON file.
-#     - output_json_path: path to save the reformatted JSON file.
-#     """
-#     # Load the JSON data
-#     data = load_json(input_json_path)
-
-#     # Save the JSON data with indentation
-#     with open(output_json_path, 'w') as f:
-#         json.dump(data, f, indent=4)
-
-# def join_coco_json(json_path_lt: list, save_dir: str):
+        try:
+            if not os.path.exists(dst_frame):
+                create_symlink(frame_name=file_, src_path=src_frame, dst_dir=dest_path)
+                print(f"Linked: {file_}")
+            else:
+                print(f"Exists: {file_}")
+        except Exception as e:
+            print(f"Error linking {file_}: {e}")
+if __name__ == "__main__":
     
-#     final_dict = {
-#         "images": [],
-#         "annotations": [],
-#         "categories": []
-#     }
+    #Relevant paths and list with 
+    this_dir = os.path.dirname(os.path.abspath(__file__))
+    endoscapes_dataset_dir = "/home/scanar/endovis/Datasets/endoscapes/"
+    all_frames_dir = path_join(endoscapes_dataset_dir, 'all')
+    frame_lt = glob(path_join(all_frames_dir, "*.jpg"))
     
-#     for json_path_file in json_path_lt:
-#         json_data = load_json(coco_json_path=json_path_file)
-        
-#         final_dict["images"].extend(json_data["images"])
-#         final_dict["annotations"].extend(json_data["annotations"])
-#         final_dict["categories"] = json_data["categories"]       
+    data_dir = path_join(this_dir, 'data')
+    endoscapes_dir = path_join(data_dir, 'endoscapes')
+    frames_endo2023 = path_join(endoscapes_dir, 'frames')
+    og_jsons_dir = path_join(data_dir, 'cvs_annotations')
+    og_jsons_lt = glob(path_join(og_jsons_dir, '*.json'))
     
-#     save_dir = path_join(save_dir, 'endoscapes201_bbox.json')
-#     save_json(data_dict=final_dict,
-#               save_path=save_dir)
+    output_json_path = path_join(og_jsons_dir, 'bbox201_annotation_coco.json')
     
-#     print(f'Joined json to path: {save_dir}')    
+    # join_coco_jsons(json_path_lt=og_jsons_lt,
+    #            output_path=output_json_path)
     
-            
-
-
-# if __name__ == "__main__":
-#     # parser = argparse.ArgumentParser()
-#     # parser.add_argument("--input_json", type=str, required=True, help="Path to the input JSON file.")
-#     # parser.add_argument("--output_json", type=str, required=True, help="Path to save the reformatted JSON file.")
-#     # args = parser.parse_args()
-
-#     # indent_json(args.input_json, args.output_json)
+    endoscapes201_json = load_json(coco_json_path=output_json_path)
+    endoscapes201_files = [f['file_name'] for f in endoscapes201_json['images']]
     
-#     # print(f"Reformatted JSON saved to {args.output_json}")
-#     # this_dir = os.path.dirname(os.path.abspath(__file__))
-#     # annot_dir = path_join(this_dir, '201_annotations')
-#     # output_path = path_join(this_dir, 'data', 'endoscapes', 'annotations_201')
-#     # path_lt = glob(path_join(annot_dir, "*.json"))
-#     # join_coco_json(json_path_lt=path_lt, save_dir=output_path)
-#     all_json = load_json('data/endoscapes/calculate_masks/all_seg_201.json')
-#     train_json = load_json('/home/scanar/endovis/models/MaskDINO/data/endoscapes/annotations/train_annotation_coco.json')
-#     val_json = load_json('/home/scanar/endovis/models/MaskDINO/data/endoscapes/annotations/val_annotation_coco.json')
-#     test_json = load_json('/home/scanar/endovis/models/MaskDINO/data/endoscapes/annotations/test_annotation_coco.json')
+    create_sym_links_endo2023(file_name_lt=endoscapes201_files,
+                              src_path=all_frames_dir, 
+                              dest_path=frames_endo2023)
     
-#     final_train_json = make_combined_trained_json(all_json, train_json, val_json, test_json)
-#     save_json(final_train_json, '/home/scanar/endovis/models/MaskDINO/data/endoscapes/annotations_201/train_annotation_coco.json')
-
-import json
-
-with open("/home/scanar/endovis/models/MaskDINO/data/endoscapes_cutmargins/annotations_sam_extended/train_annotation_coco_polygon.json") as f:
-    coco = json.load(f)
-
-missing = [a for a in coco["annotations"] if "segmentation" not in a]
-print(f"Annotations missing 'segmentation': {len(missing)}")
-if missing:
-    print("Example:", missing[0])

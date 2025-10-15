@@ -1,29 +1,35 @@
 import os 
 import sys
 import cv2 
-import json
 import logging
 import numpy as np
-import pandas as pd
 from glob import glob
 from tqdm import tqdm
-from utils import save_json
+from utils import save_json, load_json
 from collections import Counter
 from os.path import join as path_join
 
-# Create log file in the same directory
-this_dir = os.path.dirname(os.path.abspath(__file__))
-log_path = os.path.join(this_dir, 'frame_check.log')
+def check_black_frames_splits(base_dir: str, black_frame_dict: dict, annots_lt: list, splits_lt: list):
+    
+    black_frames = black_frame_dict['black_frames']
+    for annot in annots_lt:
+        print(f'Checking split frames in {annot} dir')
+        for split in splits_lt:
+            counter = 0
+            json_path = path_join(base_dir, annot, f'{split}_annotation_coco.json')
+            
+            base_json = load_json(json_path)
+            file_name_lt = [f['file_name'] for f in base_json['images']]
+            
+            for frame in black_frames:
+                new_frame = f'{frame}.jpg'
+                
+                if new_frame in file_name_lt:
+                    counter +=1    
 
-# Configure logger
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s | %(message)s',
-    handlers=[
-        logging.FileHandler(log_path, mode='w'),
-        logging.StreamHandler(sys.stdout)  
-    ]
-)
+            print(f'Total black frames in {split}: {counter}.')
+        print('-----------------------------------------------------------------------------------------')
+
 
 
 def is_black_frame(frame: np.ndarray, threshold: float = 0.10, black_ratio_threshold: float = 0.90) -> bool:
@@ -118,7 +124,7 @@ def is_weird_shape(frame_shape_dict: dict, tolerance: int = 100) -> list:
     return weird_frames
     
     
-def check_frames(frames_dir: str, frames_lt: list,output_path: str = None):
+def check_frames(frames_lt: list,output_path: str = None):
     
     #Video dictionary to store black frames paths
     frames_checker_dict = {}
@@ -173,22 +179,45 @@ def check_frames(frames_dir: str, frames_lt: list,output_path: str = None):
     
     json_path = path_join(output_path, 'frames2check.json')
     save_json(data_dict=frames_checker_dict, save_path=json_path)
-        
+    
+    return frames_checker_dict
+    
 if __name__ == "__main__":
     
     # Relevant paths
     this_dir = os.path.dirname(os.path.abspath(__file__))
     data_dir = path_join(this_dir, 'data')
-    endoscapes_dir = path_join(data_dir, 'endoscapes_cutmargins')
+    endoscapes_dir = path_join(data_dir, 'endoscapes')
     frames_dir = path_join(endoscapes_dir, 'frames')
-    output_path = path_join(this_dir, 'frames_checker')
+    output_path = path_join(this_dir, 'frames_checker', 'endoscapes2023')
     os.makedirs(output_path, exist_ok=True)
+    
+    log_path = os.path.join(this_dir, 'frame_check.log')
+
+    # Configure logger
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s | %(message)s',
+        handlers=[
+            logging.FileHandler(log_path, mode='w'),
+            logging.StreamHandler(sys.stdout)  
+        ]
+    )
     
     frames_lt = glob(path_join(frames_dir, '*.jpg'))
     
     # Check black frames
-    check_frames(frames_dir= frames_dir, 
-                       frames_lt=frames_lt,
-                       output_path=output_path)
+    black_frames_dict = check_frames(frames_lt=frames_lt,
+                 output_path=output_path)
+    logging.info(f"Black frames check completed. Results saved to {output_path}") 
     
-    logging.info(f"Black frames check completed. Results saved to {output_path}")
+    #Check black frames per split
+    annotations_lt = ['annotations', 'annotations_201']
+    splits = ['train', 'val', 'test']
+    
+    check_black_frames_splits(base_dir=endoscapes_dir,
+                              black_frame_dict=black_frames_dict,
+                              annots_lt=annotations_lt,
+                              splits_lt=splits)
+
+    
