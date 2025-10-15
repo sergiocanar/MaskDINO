@@ -1,4 +1,5 @@
 import os
+import cv2
 import json
 import torch
 import numpy as np
@@ -85,8 +86,6 @@ def create_symlink(frame_name: str, src_path: str, dst_dir: str):
     except OSError as e:
         print(f"Error linking {frame_name}: {e}")
 
-    
-
 def load_json(coco_json_path: str):
     with open(coco_json_path, 'r') as f:
         data = json.load(f)
@@ -103,46 +102,127 @@ def inverse_sigmoid(x, eps=1e-5):
     return torch.log(x1/x2)
 
 
-def dummy_plot(img: torch.Tensor, boxes=None, i: int =0, color='lime', linewidth=2):
+def dummy_plot(img: torch.Tensor, img2: np.ndarray= None, boxes=None, i: int =0, color='lime', linewidth=2, output_path: str = None):
     """
     Plots an image with Detectron2 Boxes drawn on top.
 
     Args:
         img (torch.Tensor): Image tensor of shape (C, H, W)
+        img2 (np.ndarray): Image array of shape (H,W,C)
         boxes (detectron2.structures.Boxes or torch.Tensor): Bounding boxes in (x1, y1, x2, y2)
         i (int): Index for saving the figure
         color (str): Box color
         linewidth (int): Box edge width
     """
     # --- Convert image to NumPy ---
-    img = img.cpu().numpy()
-    img = np.transpose(img, (1, 2, 0))  # (C, H, W) -> (H, W, C)
-
-    # --- Create plot ---
-    fig, ax = plt.subplots(figsize=(15, 15))
-    ax.imshow(img)
-    ax.axis('off')
-
-    # --- Convert Detectron2 Boxes to tensor if needed ---
     
-    if boxes != None:    
-        if hasattr(boxes, "tensor"):  # detectron2.structures.Boxes
-            boxes = boxes.tensor
+    if isinstance(img, torch.Tensor):    
+        img = img.cpu().numpy()
+        img = np.transpose(img, (1, 2, 0))  # (C, H, W) -> (H, W, C)
+        
+    elif isinstance(img, np.ndarray):
+        shape = img.shape
+        
+        if shape[0] == 3:
+            img = np.transpose(img, (1,2,0))
+        else:
+            pass
+    else:
+        raise TypeError('Image should be an NumPy array or PyTorch Tensor...')
+    
+    final_path = path_join(output_path, f'debug_comparison_{i}.png')
+    
+    if img2 is not None:
+        fig, ax = plt.subplots(1, 2, figsize=(15,15))
+        ax[0].imshow(img)
+        ax[0].axis('off')
+        
+        ax[1].imshow(img2)
+        ax[1].axis('off')
+        
+        plt.savefig(final_path)
+        plt.close(fig)
+        
+    else:        
+        # --- Create plot ---
+        fig, ax = plt.subplots(figsize=(15, 15))
+        ax.imshow(img)
+        ax.axis('off')
 
-        # --- Draw each box ---
-        boxes = boxes.cpu().numpy()
-        for box in boxes:
-            x1, y1, x2, y2 = box
-            rect = patches.Rectangle(
-                (x1, y1),
-                x2 - x1,
-                y2 - y1,
-                linewidth=linewidth,
-                edgecolor=color,
-                facecolor='none'
-            )
-            ax.add_patch(rect)
+        # --- Convert Detectron2 Boxes to tensor if needed ---
+        
+        if boxes != None:    
+            if hasattr(boxes, "tensor"):  # detectron2.structures.Boxes
+                boxes = boxes.tensor
 
-    # --- Save and close ---
-    plt.savefig(f'debug_{i}.png', bbox_inches='tight', pad_inches=0)
+            # --- Draw each box ---
+            boxes = boxes.cpu().numpy()
+            for box in boxes:
+                x1, y1, x2, y2 = box
+                rect = patches.Rectangle(
+                    (x1, y1),
+                    x2 - x1,
+                    y2 - y1,
+                    linewidth=linewidth,
+                    edgecolor=color,
+                    facecolor='none'
+                )
+                ax.add_patch(rect)
+
+        # --- Save and close ---
+        plt.savefig(f'debug_{i}.png', bbox_inches='tight', pad_inches=0)
+        plt.close(fig)
+
+
+def dummy_plot_three(img: np.ndarray, img_bin: np.ndarray, img_bin2: np.ndarray, crop_coords: tuple,
+                     img_crop: np.ndarray, i: int = 0, output_path: str = None):
+    """
+    Plots:
+      1. Original image with crop rectangle
+      2. Binary mask
+      3. Cropped image
+    """
+    create_directory_if_not_exists(output_path)
+    final_path = path_join(output_path, f'debug_comparison_{i}.png')
+
+    fig, ax = plt.subplots(1, 4, figsize=(18, 6))
+
+    # --- 1. Original image with rectangle ---
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    ax[0].imshow(img_rgb)
+    ax[0].set_title("Original + Detected Crop")
+    ax[0].axis('off')
+
+    if crop_coords is not None:
+        left, right, bottom, top = crop_coords
+        rect = patches.Rectangle(
+            (bottom, left),                # (x, y)
+            top - bottom,                  # width
+            right - left,                  # height
+            linewidth=3,
+            edgecolor='lime',
+            facecolor='none'
+        )
+        ax[0].add_patch(rect)
+
+    # --- 2. Binary mask ---
+    ax[1].imshow(img_bin, cmap='gray')
+    ax[1].set_title("Binary Mask")
+    ax[1].axis('off')
+
+    ax[3].imshow(img_bin2, cmap='gray')
+    ax[3].set_title("Binary Mask")
+    ax[3].axis('off')
+
+    # --- 3. Cropped image ---
+    if img_crop is not None:
+        ax[2].imshow(cv2.cvtColor(img_crop, cv2.COLOR_BGR2RGB))
+        ax[2].set_title("Cropped Region")
+        ax[2].axis('off')
+    else:
+        ax[2].set_title("No crop detected")
+        ax[2].axis('off')
+
+    plt.tight_layout()
+    plt.savefig(final_path, bbox_inches='tight', pad_inches=0)
     plt.close(fig)
