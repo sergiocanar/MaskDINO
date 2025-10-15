@@ -4,7 +4,33 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+from os.path import join as path_join
 
+
+def create_directory_if_not_exists(path):
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+
+def remove_black_frames(src_dir: str, frame_lt: list):
+    
+    for frame in frame_lt:
+        
+        new_frame = ''
+        
+        if ".jpg" not  in frame:
+            new_frame = f'{frame}.jpg'
+        else:
+            new_frame = frame
+        
+        path = path_join(src_dir, new_frame)
+                
+        try:
+            os.remove(path=path)
+            print(f'Removed path: {path}')
+        except FileNotFoundError as e:
+            print(f'The file to remove does not exist or was already removed: {e}')
+            
 def join_coco_jsons(json_path_lt: list, output_path: str):
     assert len(json_path_lt) >= 2, "Need at least 2 JSONs to merge."
 
