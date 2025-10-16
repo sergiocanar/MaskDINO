@@ -108,7 +108,62 @@ def rm_black_frame_from_json(src_dir: str, black_frames_lt: list, splits_lt: lis
     
     print('All jsons were updated and saved!')
         
-
+def get201_train_json(all_seg_data: dict, seg50jsons_lt: list, save_dir: str = None):
+    
+    new_dict = {
+        "images": [],
+        "annotations": [],
+        "categories": []
+    }
+    
+    path_lt = []
+    
+    for json_path in seg50jsons_lt:
+        json_f = load_json(json_path)
+        files = [f['file_name'] for f in json_f["images"]]
+        path_lt += files
+        
+    image_info_lt = all_seg_data["images"]
+    annos_info_lt = all_seg_data["annotations"]
+    
+    img_ids_lt = []
+    
+    for img_info in image_info_lt:
+        
+        file_name = img_info["file_name"]
+        img_id = img_info["id"]
+        
+        if file_name not in path_lt:
+            new_dict["images"].append(img_info)
+            img_ids_lt.append(img_id)
+        else: 
+            continue
+    
+    for annos_info in annos_info_lt:
+        
+        img_ann_id = annos_info["image_id"]
+        
+        if img_ann_id in img_ids_lt:
+            new_dict["annotations"].append(annos_info)
+        else:
+            continue
+        
+    for json in seg50jsons_lt:
+        if 'train' in json:
+            train_json = load_json(json)
+            
+            new_dict["images"] += train_json["images"]            
+            new_dict["annotations"] += train_json["annotations"]            
+            
+    new_dict["categories"] = all_seg_data["categories"]
+    
+    final_path = path_join(save_dir, 'train_annotation_coco.json')
+    
+    save_json(data_dict=new_dict,
+              save_path=final_path)
+    
+    print(f'Saved 201 annotation json to: {final_path}')    
+    
 if __name__ == "__main__":
     
     #Relevant paths and list with 
@@ -126,15 +181,29 @@ if __name__ == "__main__":
     output_json_path = path_join(og_jsons_dir, 'bbox201_annotation_coco.json')
     
     
-    join_coco_jsons(json_path_lt=og_jsons_lt,
-               output_path=output_json_path)
+    # join_coco_jsons(json_path_lt=og_jsons_lt,
+    #            output_path=output_json_path)
     
     endoscapes201_json = load_json(coco_json_path=output_json_path)
     endoscapes201_files = [f['file_name'] for f in endoscapes201_json['images']]
     
-    create_sym_links_endo2023(file_name_lt=endoscapes201_files,
-                              src_path=all_frames_dir, 
-                              dest_path=frames_endo2023)
+    # create_sym_links_endo2023(file_name_lt=endoscapes201_files,
+    #                           src_path=all_frames_dir, 
+    #                           dest_path=frames_endo2023)
+    
+    annots_endo2023_dir = path_join(endoscapes_dir, 'annotations')
+    seg50_json_lt = glob(path_join(annots_endo2023_dir, '*_coco.json'))
+    calculate_masks_dir = path_join(endoscapes_dir, 'calculate_masks')
+    all_seg_201_json = path_join(calculate_masks_dir, 'all_seg_201.json')
+    all_seg_201_data = load_json(all_seg_201_json)
+    
+    output_201_dir = path_join(endoscapes_dir, 'annotations_201')
+    
+    
+    
+    get201_train_json(all_seg_data=all_seg_201_data,
+                      seg50jsons_lt=seg50_json_lt,
+                      save_dir=output_201_dir)
     
     # check_dir = path_join(this_dir, 'frames_checker', 'endoscapes2023')
     # frames2check_path = path_join(check_dir, 'frames2check.json')
