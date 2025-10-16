@@ -106,18 +106,22 @@ def plot_random_samples_from_coco(
         # --- Plot ---
         fig, axs = plt.subplots(1, 4, figsize=(20, 8))
         axs[0].imshow(frame)
+        print(frame.shape)
         axs[0].set_title("Original Frame")
         axs[0].axis("off")
 
         axs[1].imshow(mask_rgb)
+        print(mask_rgb.shape)
         axs[1].set_title("Original Segmentation (Black BG)")
         axs[1].axis("off")
 
         axs[2].imshow(cut_frame)
+        print(cut_frame.shape)
         axs[2].set_title("Cropped Frame")
         axs[2].axis("off")
 
         axs[3].imshow(cut_mask_rgb)
+        print(cut_mask_rgb.shape)
         axs[3].set_title("Cropped Segmentation (Black BG)")
         axs[3].axis("off")
 
@@ -132,7 +136,7 @@ plot_random_samples_from_coco(
     frame_dir="/home/scanar/endovis/models/MaskDINO/data/endoscapes/frames",
     cut_frame_dir="/home/scanar/endovis/models/MaskDINO/data/endoscapes_cutmargins/frames",
     coco_json_path="/home/scanar/endovis/models/MaskDINO/data/endoscapes/annotations/train_annotation_coco.json",
-    cut_coco_json_path="/home/scanar/endovis/models/MaskDINO/data/endoscapes_cutmargins/annotations/train_annotation_coco.json",
+    cut_coco_json_path="/home/scanar/endovis/models/MaskDINO/data/endoscapes/calculate_masks/all_seg_201.json",
     output_dir="/home/scanar/endovis/models/MaskDINO/visualizations/compare_segms",
     num_samples=5
 )

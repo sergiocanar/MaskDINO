@@ -291,7 +291,7 @@ def instances_to_coco_json(instances, img_id, ann_id):
 
 #paths
 config_path = "configs/endoscapes/instance-segmentation/swin/maskdino_R50_bs16_50ep_4s_dowsample1_2048.yaml"
-weights_path = "weights/best_endoscapes_cutmargins.pth"
+weights_path = "outputs/Endoscapes2023_cutmargins_train/model_best.pth"
 
 #Setup the model based on the config and weights. In this case Im using a Swin backbone trained with MaskDINO on Endoscapes cutmargins
 cfg = get_cfg()
@@ -306,7 +306,7 @@ cfg.SOLVER.IMS_PER_BATCH = 1
 cfg.freeze()
 
 #Register the surgical dataset as in TAPIS
-register_surgical_dataset(cfg)
+register_surgical_dataset(cfg, 'calculate_masks')
 dataset_dicts = DatasetCatalog.get("endoscapes_train")
 
 # Build model
@@ -332,7 +332,7 @@ data_loader = DataLoader(
 # data_loader = build_detection_train_loader(cfg, mapper=mapper)
 
 #Save directory for the predicted masks
-save_dir = "data/endoscapes/annotations_201"
+save_dir = "data/endoscapes/calculate_masks"
 os.makedirs(save_dir, exist_ok=True)
 
 
