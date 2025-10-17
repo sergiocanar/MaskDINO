@@ -22,6 +22,7 @@ def rle_to_polygon(coco_json_path, output_json_path):
     # Load the COCO JSON
     data = load_json(coco_json_path)
 
+    valid_annotations = []
     # Iterate through the annotations
     for ann in tqdm(data['annotations']):
         if 'segmentation' in ann and type(ann['segmentation']) is not list:
@@ -40,9 +41,16 @@ def rle_to_polygon(coco_json_path, output_json_path):
                 if len(contour)%2 == 0 and len(contour) >= 6:
                     segmentation.append(contour)
             
-            # Replace RLE with polygon
-            ann['segmentation'] = segmentation
-
+            if len(segmentation) == 0:
+                continue
+            else:                
+                # Replace RLE with polygon
+                ann['segmentation'] = segmentation
+                valid_annotations.append(ann)
+    
+    
+    data["annotations"] = valid_annotations
+    
     # Save the modified COCO JSON
     with open(output_json_path, 'w') as f:
         json.dump(data, f, indent=4)
