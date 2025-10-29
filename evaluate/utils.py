@@ -399,10 +399,27 @@ def getrealbox(boxes, box):
     return realbox
 
 
-def filter_preds(preds_list, method, parameters):
+def filter_preds(preds_list: list, method: str, parameters: list):
+    
+    '''
+    Function for filtering predictions according to different methods.
+    -----------
+    Parameters:
+    preds_list : list
+        List of prediction dictionaries, each containing 'score' and 'category_id'.
+    method : str
+        Method for filtering predictions (e.g., "all", "topk", "thresh", "cls").
+    parameters : list
+        Parameters for the filtering method.
+    
+    '''
+    
+    # If method is "all", return all predictions with score > 0
+    
     if method == "all":
         return [p for p in preds_list if p["score"] > 0]
     
+    #Sort predictions by score if "topk" is in method
     if "topk" in method:
         preds_list.sort(key=lambda x: x["score"], reverse=True)
 
@@ -436,17 +453,28 @@ def filter_preds(preds_list, method, parameters):
         return list(itertools.chain(*list(cls_preds.values())))
 
     else:
+        # Apply filtering based on "topk" and/or "thresh"
         if "topk" in method:
             preds_list = preds_list[: parameters[0]]
         if "thresh" in method:
             preds_list = [p for p in preds_list if p["score"] >= parameters[1]]
         return preds_list
 
+def rle2bbox(rle):
+    mask = decode_rle_to_mask(rle)
+    bbox = mask_to_bbox(mask, full_coordinates=True)
+    return bbox
 
 def format_instances(instances, width, height, segmentation=False, num_classes=None):
     formated_instances = []
     for instance in instances:
-        bbox = instance["bbox"]
+        
+        if "bbox" in instance.keys():
+            bbox = instance["bbox"]
+        else:
+            segm = instance["segmentation"]
+            bbox = rle2bbox(segm)
+            
         x1, y1, w, h = bbox
         x2, y2 = x1 + w, y1 + h
         x1 /= width
@@ -460,8 +488,6 @@ def format_instances(instances, width, height, segmentation=False, num_classes=N
                     remaining = (1 - instance["score"]) / (num_classes - 1)
                     vector = [remaining] * num_classes
                     
-                    breakpoint()
-
                     # asignar el score a su categoría
                     vector[instance["category_id"]] = instance["score"]
                     instance["score_dist"] = vector
@@ -484,7 +510,6 @@ def format_instances(instances, width, height, segmentation=False, num_classes=N
             
         #Just for MaskDINO 
         this_instance["category_id"] = instance["category_id"]
-
         formated_instances.append(this_instance)
     
     return formated_instances
@@ -497,9 +522,26 @@ def get_num_classes(path):
     return len(data["categories"])
 
 
-def read_detectron2_output(
-    coco_anns_path, preds_path, selection, selection_params, segmentation=False
-):
+def read_detectron2_output(coco_anns_path: str, preds_path: str, selection, selection_params, segmentation=False):
+    
+    '''
+    Read Detectron2 output predictions from a .pth or .json file and filter them according to the specified method.
+    -----------
+    Parameters:
+    coco_anns_path : str
+        Path to the COCO annotations JSON file.
+    preds_path : str
+        Path to the predictions file (.pth or .json).
+    selection : str
+        Method for filtering predictions (e.g., "all", "topk", "thresh", "cls").
+    selection_params : list or dict
+        Parameters for the filtering method.
+    segmentation : bool, optional
+        If True, includes segmentation masks in the output instances. Default is False.
+    -----------
+    
+    '''
+    #Load json and gather info for preds dict    
     data_dict = load_json(coco_anns_path)
     data_dict, id2name = gather_info(data_dict)
 
@@ -527,15 +569,14 @@ def read_detectron2_output(
             data_dict[id2name[pred["image_id"]]["file_name"]]["instances"] = instances
 
     elif "json" in preds_path:
+        #Load the predictions from the json file. Each image should have 100 predictions from MaskDINO/Detectron2 output
         preds = load_json(preds_path)
-
         for pred in tqdm(preds, desc="Separating preds"):
             if pred["category_id"] > 0 and pred["score"] > 0.0:
+                # Adjust category_id to be zero-based. As in COCO it starts from 1.
                 pred["category_id"] -= 1
-                data_dict[id2name[pred["image_id"]]["file_name"]]["instances"].append(
-                    pred
-                )
-
+                data_dict[id2name[pred["image_id"]]["file_name"]]["instances"].append(pred)
+                        
         for name in tqdm(data_dict, desc="Filtering preds"):
             if len(data_dict[name]["instances"]):
                 image_id = data_dict[name]["instances"][0]["image_id"]

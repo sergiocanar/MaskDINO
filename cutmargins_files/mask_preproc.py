@@ -10,7 +10,7 @@ from tqdm import tqdm
 from pycocotools.coco import COCO
 from os.path import join as path_join
 from pycocotools import mask as mask_utils
-from cut_black_margins import filter_black_endo2023
+from cut_black_margins import filter_black_endo2023, change_size
 from utils import load_json, create_directory_if_not_exists
 
 parser = argparse.ArgumentParser()
@@ -111,12 +111,15 @@ def prepocess_masks(base_dir: str, cutted_dir: str,coco_json_dict: dict, coco_ob
                 
                 mask[segm_mask == 1] = ann['category_id'] 
                                 
-                _, coords = filter_black_endo2023(image=img)
+                # _, coords = filter_black_endo2023(image=img)
+                _, coords = change_size(image=img)
                 
                 #Cut the mask
                 if coords is not None:
-                    l, r, b, t = coords
-                    new_mask = mask[l:r, b:t]
+                    # l, r, b, t = coords
+                    # new_mask = mask[l:r, b:t]
+                    l, w_m, b, h_m = coords
+                    new_mask = mask[l:l+w_m, b:b+h_m]
                 else:
                     print(f'Mask not cutted for frame: {file_name}')
                     new_mask = segm_mask
