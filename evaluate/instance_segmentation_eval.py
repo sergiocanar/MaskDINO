@@ -76,9 +76,10 @@ def organize_pred_pascal(gt_keys, preds, task, num_classes):
     """
     bboxes for preds are in format [x1,y1,x2,y2]
     """
-
+    
     pred_bboxes = defaultdict(list)
     pred_scores = defaultdict(list)
+    #Here the preds are 0 indexed...
     pred_labels = defaultdict(list)
     pred_segments = defaultdict(list)
     pred_keys = list(preds.keys())
@@ -112,7 +113,7 @@ def organize_pred_pascal(gt_keys, preds, task, num_classes):
 
                 new_box = [y1, x1, y2, x2]
                 
-                cls_id = this_box.get("category_id", 1)
+                cls_id = this_box.get("category_id", 1) + 1 # Adjust for 1 indexing
 
                 pred_bboxes[new_key].append(new_box)
                 pred_segments[new_key].append(segment)
@@ -146,7 +147,9 @@ def run_evaluation(categories, groundtruth, detections, excluded_keys, verbose=T
     """AVA evaluation main logic."""
 
     boxes, segments, labels, image_sizes = groundtruth
-
+    
+    breakpoint()
+    
     pascal_evaluator = object_detection_evaluation.PascalInstanceSegmentationEvaluator(
         categories
     )

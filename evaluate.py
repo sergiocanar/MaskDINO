@@ -2,6 +2,7 @@ import os
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+import json
 import argparse
 import numpy as np
 import pandas as pd
@@ -190,6 +191,8 @@ def main(coco_ann_path: str, pred_path:str, compute_coco: bool, preds: dict, tas
     else:
         datasets = False
     for task, metric in zip(tasks, metrics):
+
+        # Evaluate task, in this case segmentation in general.
         task_eval, aux_metrics = eval_task(task, metric, coco_anns, preds, masks_path)
         aux_metrics = dict(
             zip(aux_metrics.keys(), map(lambda x: round(x, 8), aux_metrics.values()))
@@ -357,7 +360,7 @@ if __name__ == "__main__":
         coco_ann_path=args.coco_ann_path,
         pred_path=args.pred_path,
         compute_coco=args.coco,
-        preds=args.pred_path,
+        preds=preds_dict,
         tasks=args.tasks,
         metrics=args.metrics,
         output_dir=output_dir,
