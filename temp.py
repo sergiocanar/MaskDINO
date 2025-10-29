@@ -194,10 +194,11 @@ if __name__ == "__main__":
     annots_endo2023_dir = path_join(endoscapes_dir, 'annotations')
     seg50_json_lt = glob(path_join(annots_endo2023_dir, '*_coco.json'))
     calculate_masks_dir = path_join(endoscapes_dir, 'calculate_masks')
-    all_seg_201_json = path_join(calculate_masks_dir, 'all_seg_201.json')
+    all_seg_201_json = path_join(calculate_masks_dir, 'filtered_predictions.json')
     all_seg_201_data = load_json(all_seg_201_json)
     
-    output_201_dir = path_join(endoscapes_dir, 'annotations_201')
+    output_201_dir = path_join(endoscapes_dir, 'annotations_201_filtered')
+    create_directory_if_not_exists(output_201_dir)
     
     
     

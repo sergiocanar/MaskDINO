@@ -105,7 +105,7 @@ def eval_segmentation(task, coco_anns, preds, img_ann_dict, **kwargs):
                         "score": score,
                     }
                 )
-
+            
             # Combine predicted masks into a single semantic image
             score_masks = []
             for ins in instances:
@@ -113,7 +113,8 @@ def eval_segmentation(task, coco_anns, preds, img_ann_dict, **kwargs):
                 this_score_mask = np.zeros(
                     (height, width, len(cats) + 1), dtype=np.float32
                 )
-                this_score_mask[:, :, ins["category_id"]] = p_mask * ins["score"]
+                current_score = np.argmax(ins["score"]) + 1
+                this_score_mask[:, :, ins["category_id"]] = p_mask * current_score
                 score_masks.append(this_score_mask)
 
             # This is necessary due to possible overlapping masks

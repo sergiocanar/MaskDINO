@@ -15,6 +15,42 @@ from os.path import join as path_join
 from skimage.morphology import binary_erosion, disk
 from utils import load_json, create_directory_if_not_exists
 
+def change_size(image):
+ 
+    binary_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    _, binary_image2 = cv2.threshold(binary_image, 15, 255, cv2.THRESH_BINARY)
+    binary_image2 = cv2.medianBlur(binary_image2, 19)  # filter the noise, need to adjust the parameter based on the dataset
+    x = binary_image2.shape[0]
+    y = binary_image2.shape[1]
+
+    edges_x = []
+    edges_y = []
+    for i in range(x):
+        for j in range(10,y-10):
+            if binary_image2.item(i, j) != 0:
+                edges_x.append(i)
+                edges_y.append(j)
+    
+    if not edges_x:
+        return image
+
+    left = min(edges_x)  # left border
+    right = max(edges_x)  # right
+    width = right - left  
+    bottom = min(edges_y)  # bottom
+    top = max(edges_y)  # top
+    height = top - bottom  
+
+    pre1_picture = image[left:left + width, bottom:bottom + height]  
+
+    #print(pre1_picture.shape) 
+    
+    coords = (left, width, bottom, height)
+    
+    return pre1_picture, coords
+
+
+
 def filter_black_endo2023(image):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     binary_image = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY, 31, 5)
@@ -54,7 +90,8 @@ def process_image(frame_src: str, save_path: str):
     file_name = os.path.basename(frame_src)
     frame_out_path = os.path.join(save_path, file_name)
     frame = cv2.imread(frame_src)
-    frame, _ = filter_black_endo2023(frame)
+    # frame, _ = filter_black_endo2023(frame)
+    frame, _ = change_size(frame)
     cv2.imwrite(frame_out_path, frame)
 
 if __name__ == "__main__":

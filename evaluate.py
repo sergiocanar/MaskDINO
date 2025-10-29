@@ -1,10 +1,14 @@
 import os
-import json
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import argparse
 import numpy as np
 import pandas as pd
 from tabulate import tabulate
 from pycocotools.coco import COCO
+from os.path import join as path_join
+from utils import load_json, save_json
 from evaluate.main_eval import eval_task
 from pycocotools.cocoeval import COCOeval
 from evaluate.utils import load_json, read_detectron2_output
@@ -187,6 +191,8 @@ def main(coco_ann_path: str, pred_path:str, compute_coco: bool, preds: dict, tas
     else:
         datasets = False
     for task, metric in zip(tasks, metrics):
+
+        # Evaluate task, in this case segmentation in general.
         task_eval, aux_metrics = eval_task(task, metric, coco_anns, preds, masks_path)
         aux_metrics = dict(
             zip(aux_metrics.keys(), map(lambda x: round(x, 8), aux_metrics.values()))
@@ -245,16 +251,22 @@ def main(coco_ann_path: str, pred_path:str, compute_coco: bool, preds: dict, tas
                 met_suf = "class"
             os.makedirs(output_dir, exist_ok=True)
             if os.path.isfile(os.path.join(output_dir, f"metrics_{met_suf}.json")):
-                with open(
-                    os.path.join(output_dir, f"metrics_{met_suf}.json"), "r"
-                ) as f:
-                    save_json = json.load(f)
-                    save_json[sufix] = all_metrics[task]
+                file_name = path_join(output_dir, f"metrics_{met_suf}.json")
+                save_json_data = load_json(file_name)
+                save_json_data[sufix] = all_metrics[task]
+                if compute_coco:
+                    save_json_data["COCO_segm"] = all_metrics.get('COCO_segm', {})
             else:
-                save_json = {sufix: all_metrics[task]}
-            with open(os.path.join(output_dir, f"metrics_{met_suf}.json"), "w") as f:
-                json.dump(save_json, f, indent=4)
-
+                save_json_data = {
+                    sufix: all_metrics[task]
+                }
+                if compute_coco:
+                    save_json_data["COCO_segm"] = all_metrics.get('COCO_segm', {})
+                    
+            save_json_path = path_join(output_dir, f"metrics_{met_suf}.json")
+            save_json(save_json_data, save_json_path)
+        
+        
             excel_file = os.path.join(output_dir, f"metrics_{met_suf}.xlsx")
             if os.path.exists(excel_file):
                 existing_df = pd.read_excel(excel_file)
@@ -272,26 +284,6 @@ def main(coco_ann_path: str, pred_path:str, compute_coco: bool, preds: dict, tas
             updated_df = pd.concat([existing_df, new_df], ignore_index=True)
             with pd.ExcelWriter(excel_file, engine="xlsxwriter") as writer:
                 updated_df.to_excel(writer, index=False)    
-    if compute_coco:
-        coco_metrics = all_metrics.get('COCO_segm', {})
-        if 'AP@[.5:.95]' in coco_metrics:
-            overall_metric = coco_metrics['AP@[.5:.95]']
-        else:
-            print("⚠️ 'AP@[.5:.95]' not found in COCO metrics.")
-            overall_metric = np.nan
-    else:
-        try:
-            overall_metric = np.mean([
-                v[m] for v, m in zip(list(all_metrics.values()), metrics)
-                if m in v  # safeguard for missing keys
-            ])
-        except Exception as e:
-            print(f"Error computing overall_metric: {e}")
-            overall_metric = np.nan
-
-    print(f"Overall Metric: {overall_metric:.4f}")
-
-    return overall_metric
 
 
 if __name__ == "__main__":
@@ -299,17 +291,17 @@ if __name__ == "__main__":
     #Arguments used for evaluation
     args = eval_parser()
 
+    assert len(args.tasks) == len(args.metrics), f"{args.tasks} {args.metrics}. Tasks and metrics must have the same length." 
     
-    assert len(args.tasks) == len(args.metrics), f"{args.tasks} {args.metrics}"
-    preds = args.pred_path
+    # Filter predictions if is requiered
     if args.filter:
         assert len(args.metrics) == 1, args.metrics
         assert args.tasks == ["instruments"], args.tasks
-        segmentation = (
-            "segmentation" in args.metrics[0]
-            or "seg" in args.metrics[0]
-            or "mIoU" in args.metrics[0]
-        )
+        
+        #Boolean to know if we're evaluating segmentation
+        segmentation = ("segmentation" in args.metrics[0] or "seg" in args.metrics[0]or "mIoU" in args.metrics[0])
+        
+        #Select filter method. In the argument parser selection can be a tuple. the first value is topk and the second is threshold
         if args.selection == "thresh":
             selection_params = [None, float(args.selection_info)]
         elif args.selection == "topk":
@@ -326,12 +318,15 @@ if __name__ == "__main__":
         elif "cls" in args.selection:
             assert type(args.selection_info) == str
             assert os.path.isfile(args.selectrion_info)
-            with open(args.selection_info, "r") as f:
-                selection_params = json.load(f)
+            selection_params = load_json(args.selection_info)
         else:
             raise ValueError(f"Incorrect selection type {args.selection}")
-        preds = read_detectron2_output(
-            args.coco_ann_path, preds, args.selection, selection_params, segmentation
+        preds_dict = read_detectron2_output(
+            coco_anns_path=args.coco_ann_path,
+            preds_path=args.pred_path,
+            selection=args.selection,
+            selection_params=selection_params,
+            segmentation=segmentation
         )
 
     output_dir = None
@@ -350,7 +345,7 @@ if __name__ == "__main__":
         coco_ann_path=args.coco_ann_path,
         pred_path=args.pred_path,
         compute_coco=args.coco,
-        preds=preds,
+        preds=preds_dict,
         tasks=args.tasks,
         metrics=args.metrics,
         output_dir=output_dir,

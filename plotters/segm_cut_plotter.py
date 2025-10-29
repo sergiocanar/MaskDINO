@@ -133,9 +133,9 @@ def plot_random_samples_from_coco(
 
 # Example usage
 plot_random_samples_from_coco(
-    frame_dir="/home/scanar/endovis/models/MaskDINO/data/endoscapes/frames",
+    frame_dir="/home/scanar/endovis/models/MaskDINO/data/endoscapes_cutmargins/frames",
     cut_frame_dir="/home/scanar/endovis/models/MaskDINO/data/endoscapes_cutmargins/frames",
-    coco_json_path="/home/scanar/endovis/models/MaskDINO/data/endoscapes/annotations/train_annotation_coco.json",
+    coco_json_path="/home/scanar/endovis/models/MaskDINO/data/endoscapes_cutmargins/annotations_201_filtered/train_annotation_coco.json",
     cut_coco_json_path="/home/scanar/endovis/models/MaskDINO/data/endoscapes_cutmargins/annotations_201/train_annotation_coco.json",
     output_dir="/home/scanar/endovis/models/MaskDINO/visualizations/compare_segms",
     num_samples=5
