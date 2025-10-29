@@ -146,10 +146,7 @@ def organize_pred_pascal(gt_keys, preds, task, num_classes):
 def run_evaluation(categories, groundtruth, detections, excluded_keys, verbose=True):
     """AVA evaluation main logic."""
 
-    boxes, segments, labels, image_sizes = groundtruth
-    
-    breakpoint()
-    
+    boxes, segments, labels, image_sizes = groundtruth    
     pascal_evaluator = object_detection_evaluation.PascalInstanceSegmentationEvaluator(
         categories
     )

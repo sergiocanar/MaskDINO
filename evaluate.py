@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 from tabulate import tabulate
 from pycocotools.coco import COCO
+from os.path import join as path_join
 from utils import load_json, save_json
 from evaluate.main_eval import eval_task
 from pycocotools.cocoeval import COCOeval
@@ -251,17 +252,22 @@ def main(coco_ann_path: str, pred_path:str, compute_coco: bool, preds: dict, tas
                 met_suf = "class"
             os.makedirs(output_dir, exist_ok=True)
             if os.path.isfile(os.path.join(output_dir, f"metrics_{met_suf}.json")):
-
-                with open(
-                    os.path.join(output_dir, f"metrics_{met_suf}.json"), "r"
-                ) as f:
-                    save_json = json.load(f)
-                    save_json[sufix] = all_metrics[task]
+                file_name = path_join(output_dir, f"metrics_{met_suf}.json")
+                save_json_data = load_json(file_name)
+                save_json_data[sufix] = all_metrics[task]
+                if compute_coco:
+                    save_json_data["COCO_segm"] = all_metrics.get('COCO_segm', {})
             else:
-                save_json = {sufix: all_metrics[task]}
-            with open(os.path.join(output_dir, f"metrics_{met_suf}.json"), "w") as f:
-                json.dump(save_json, f, indent=4)
-
+                save_json_data = {
+                    sufix: all_metrics[task]
+                }
+                if compute_coco:
+                    save_json_data["COCO_segm"] = all_metrics.get('COCO_segm', {})
+                    
+            save_json_path = path_join(output_dir, f"metrics_{met_suf}.json")
+            save_json(save_json_data, save_json_path)
+        
+        
             excel_file = os.path.join(output_dir, f"metrics_{met_suf}.xlsx")
             if os.path.exists(excel_file):
                 existing_df = pd.read_excel(excel_file)
@@ -279,26 +285,6 @@ def main(coco_ann_path: str, pred_path:str, compute_coco: bool, preds: dict, tas
             updated_df = pd.concat([existing_df, new_df], ignore_index=True)
             with pd.ExcelWriter(excel_file, engine="xlsxwriter") as writer:
                 updated_df.to_excel(writer, index=False)    
-    if compute_coco:
-        coco_metrics = all_metrics.get('COCO_segm', {})
-        if 'AP@[.5:.95]' in coco_metrics:
-            overall_metric = coco_metrics['AP@[.5:.95]']
-        else:
-            print("⚠️ 'AP@[.5:.95]' not found in COCO metrics.")
-            overall_metric = np.nan
-    else:
-        try:
-            overall_metric = np.mean([
-                v[m] for v, m in zip(list(all_metrics.values()), metrics)
-                if m in v  # safeguard for missing keys
-            ])
-        except Exception as e:
-            print(f"Error computing overall_metric: {e}")
-            overall_metric = np.nan
-
-    print(f"Overall Metric: {overall_metric:.4f}")
-
-    return overall_metric
 
 
 if __name__ == "__main__":
