@@ -315,7 +315,6 @@ model = predictor.model.to(cfg.MODEL.DEVICE)
 model.eval()
 
 #Build dataloader based on the config and the registered dataset
-dataset_name = "endoscapes_train"
 mapper = COCOInstanceNewBaselineDatasetMapper(cfg, is_train=False)
 
 # Build Detectron2-style dataset but without sampling repetition

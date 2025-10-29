@@ -5,7 +5,141 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import pycocotools.mask as mask_util
 from os.path import join as path_join
+from detectron2.structures import BoxMode
+
+def remove_duplicates_n_features(instances):
+    """
+    This function removes duplicate instances based on their bounding boxes, keeping the instance with the highest score.
+
+    Parameters:
+    instances : list of dicts
+        Each dictionary represents an instance with keys including 'bbox' (bounding box) and 'score'.
+
+    Returns:
+    list of dicts
+        A list of unique instances, where each bounding box appears only once, keeping the instance with the highest score.
+    """
+
+    # Initialize a dictionary to store unique instances keyed by their bounding boxes
+    no_dups = {}
+
+    # Iterate through each instance
+    for inst in instances:
+        # Only consider instances with a positive score
+        if inst["score"] > 0:
+            # Convert the bounding box to a tuple to use as a dictionary key
+            bbox_key = tuple(inst["bbox"])
+
+            # If the bounding box is not already in the dictionary, add the instance
+            if bbox_key not in no_dups:
+                no_dups[bbox_key] = inst
+            else:
+                # If the bounding box is already in the dictionary, keep the instance with the higher score
+                if inst["score"] > no_dups[bbox_key]["score"]:
+                    no_dups[bbox_key] = inst
+
+    # Return the list of unique instances
+    return list(no_dups.values())
+
+
+def instances_to_coco_json(instances, img_id, ann_id):
+    """
+    Dump an "Instances" object to a COCO-format json that's used for evaluation.
+    """
+    
+    num_instance = len(instances)
+    if num_instance == 0:
+        return []
+
+    # ---- Always move to CPU-friendly containers first
+    boxes = []
+    scores = []
+    classes = []
+    embeds = None
+    dec_outs = None
+    score_dists = None
+
+    # ---- Initialize flags up-front so they're always defined
+    has_mask = instances.has("pred_masks")
+    has_embd = False
+    has_obj_queries = False
+    has_score_dist = False
+
+    # ---- Core fields (boxes / scores / classes)
+    boxes = instances.pred_boxes.tensor.detach().cpu().numpy()
+    boxes = BoxMode.convert(boxes, BoxMode.XYXY_ABS, BoxMode.XYWH_ABS).tolist()
+    scores = instances.scores_dist.detach().cpu().tolist()
+    classes = instances.pred_classes.detach().cpu().tolist()
+
+    # ---- Optional: mask embeddings
+    if instances.has("mask_embd"):
+        embeds = instances.mask_embd.detach().cpu().tolist()
+        has_embd = True
+
+    # ---- Optional: decoder outputs (consistent key names)
+    #   If your Instances stores it as 'decoder_out', use that key.
+    #   If you actually store 'object_queries', change both lines accordingly.
+    if instances.has("object_queries"):
+        dec_outs = instances.object_queries.detach().cpu().tolist()
+        has_obj_queries = True
+
+    # ---- Optional: per-class score distributions
+    #   Use the correct key: 'score_dist' (not 'scores')
+    if instances.has("scores_dist"):
+        score_dists = instances.scores_dist.detach().cpu().tolist()
+        has_score_dist = True
+
+    # ---- Masks (RLE encode if present)
+    if has_mask:
+        rles = [
+            mask_util.encode(np.array(m[:, :, None], order="F", dtype="uint8"))[0]
+            for m in instances.pred_masks.detach().cpu().numpy()
+        ]
+        for rle in rles:
+            rle["counts"] = rle["counts"].decode("utf-8")
+            
+    # breakpoint()
+    # ---- Build results
+    results = []
+    for k in range(num_instance):
+        result = {
+            "id": ann_id,
+            "image_id": img_id,
+            "category_id": classes[k] + 1,
+            "bbox": boxes[k],
+            "score": scores[k],
+        }
+        if has_mask:
+            result["segmentation"] = rles[k]
+        if has_embd:
+            result["mask_embd"] = embeds[k]
+        if has_obj_queries:
+            result["decoder_out"] = dec_outs[k]
+        if has_score_dist:
+            result["score_dist"] = score_dists[k]
+        
+        ann_id+=1
+        
+        results.append(result)
+    
+    results = remove_duplicates_n_features(results)
+    
+    return results
+
+def trivial_batch_collator(batch):
+    """
+    A simple batch collator that does no collation.
+    It simply returns the list of data as-is.
+
+    Args:
+        batch (list): A list of data samples, where each sample is typically a dictionary.
+
+    Returns:
+        list: The same list of data samples.
+    """
+    return batch
 
 
 def create_directory_if_not_exists(path):
