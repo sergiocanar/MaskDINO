@@ -86,21 +86,19 @@ def eval_parser():
     print(args)
     
     return args
-
 def run_coco_eval(gt_path, preds, eval_type='segm'):
     coco_gt = COCO(gt_path)
 
     if isinstance(preds, dict) and "annotations" in preds:
         preds = preds["annotations"]
 
-    # Clean any extra fields as sanity checks. I only want to evaluate segmentation @ the moment 
+    # Clean unnecessary fields
     for p in preds:
         for k in ["decoder_out", "score_dist", "mask_embd", "global_ft"]:
             p.pop(k, None)
         if eval_type == "segm":
             p.pop("bbox", None)
     
-    #Standard COCO evaluarion
     coco_dt = coco_gt.loadRes(preds)
     coco_eval = COCOeval(coco_gt, coco_dt, eval_type)
     coco_eval.params.iouThrs = np.linspace(0.5, 0.95, 10)
@@ -109,6 +107,7 @@ def run_coco_eval(gt_path, preds, eval_type='segm'):
     coco_eval.accumulate()
     coco_eval.summarize()
 
+    # Global metrics
     names = [
         "AP@[.5:.95]", "AP@0.5", "AP@0.75",
         "AP_small", "AP_medium", "AP_large",
@@ -116,7 +115,23 @@ def run_coco_eval(gt_path, preds, eval_type='segm'):
         "AR_small", "AR_medium", "AR_large"
     ]
     metrics = {name: round(float(val) * 100, 3) for name, val in zip(names, coco_eval.stats)}
+
+    # --- Per-class AP computation ---
+    per_class_ap = {}
+    for catId in coco_gt.getCatIds():
+        nm = coco_gt.loadCats(catId)[0]['name']
+        # Compute mean precision over IoUs and recalls for this category
+        precision = coco_eval.eval['precision'][:, :, catId-1, 0, -1]
+        precision = precision[precision > -1]
+        if precision.size:
+            per_class_ap[nm] = round(np.mean(precision) * 100, 3)
+        else:
+            per_class_ap[nm] = float('nan')
+    
+    metrics['per_class_AP'] = per_class_ap
+        
     return metrics
+
 
 def format_horizontal_table(metrics_dict, n_cols=6, default_category="Overall"):
     assert n_cols % 3 == 0, "n_cols debe ser múltiplo de 3"
@@ -278,12 +293,24 @@ def main(coco_ann_path: str, pred_path:str, compute_coco: bool, preds: dict, tas
                 for k, v in [("Experiments", sufix)] + list(all_metrics[task].items())
                 if k == "Experiments" or v > 0
             }
+            
+            if compute_coco:
+                for k, v in all_metrics.get('COCO_segm', {}).items():
+                    
+                    if k != 'per_class_AP':
+                        new_row[f"COCO_segm-{k}"] = v
+                    else:
+                        for class_name, class_ap in v.items():
+                            new_row[f"COCO_segm-per_class_AP-{class_name}"] = class_ap
+                                                
             new_df = pd.DataFrame([new_row])
 
             # updated_df = existing_df.append(new_df, ignore_index=True)
             updated_df = pd.concat([existing_df, new_df], ignore_index=True)
             with pd.ExcelWriter(excel_file, engine="xlsxwriter") as writer:
                 updated_df.to_excel(writer, index=False)    
+                
+            print(f"Metrics saved to {save_json_path} and {excel_file}")
 
 
 if __name__ == "__main__":
