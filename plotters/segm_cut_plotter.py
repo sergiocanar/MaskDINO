@@ -50,7 +50,7 @@ def combine_masks(coco, img_id):
 def plot_random_samples_from_coco(
     frame_dir, cut_frame_dir,
     coco_json_path, cut_coco_json_path,
-    output_dir, num_samples=5
+    output_dir
 ):
     # --- Load COCOs ---
     coco = COCO(coco_json_path)
@@ -60,11 +60,8 @@ def plot_random_samples_from_coco(
 
     # --- Get image IDs ---
     all_img_ids = coco.getImgIds()
-    random.shuffle(all_img_ids)
-    selected_ids = all_img_ids[:num_samples]
-    print(f"🎲 Selected {len(selected_ids)} random samples")
 
-    for img_id in selected_ids:
+    for img_id in all_img_ids:
         img_info = coco.loadImgs(img_id)[0]
         file_name = img_info["file_name"]
 
@@ -72,7 +69,7 @@ def plot_random_samples_from_coco(
         cut_frame_path = os.path.join(cut_frame_dir, file_name)
 
         if not os.path.exists(frame_path) or not os.path.exists(cut_frame_path):
-            print(f"⚠️ Missing frame or cut frame for {file_name}")
+            print(f"Missing frame or cut frame for {file_name}")
             continue
 
         frame = np.array(Image.open(frame_path).convert("RGB"))
@@ -90,7 +87,7 @@ def plot_random_samples_from_coco(
                 break
 
         if cut_id is None:
-            print(f"⚠️ No matching cut image for {file_name}")
+            print(f"No matching cut image for {file_name}")
             continue
         cut_mask_combined = combine_masks(cut_coco, cut_id)
 
@@ -129,7 +126,7 @@ def plot_random_samples_from_coco(
         save_path = os.path.join(output_dir, f"{os.path.splitext(file_name)[0]}_comparison.png")
         plt.savefig(save_path, bbox_inches='tight')
         plt.close()
-        print(f"✅ Saved {save_path}")
+        print(f"Saved {save_path}")
 
 # Example usage
 plot_random_samples_from_coco(
@@ -137,6 +134,5 @@ plot_random_samples_from_coco(
     cut_frame_dir="/home/scanar/endovis/models/MaskDINO/data/endoscapes_cutmargins/frames",
     coco_json_path="/home/scanar/endovis/models/MaskDINO/data/endoscapes_cutmargins/annotations_201_filtered/train_annotation_coco.json",
     cut_coco_json_path="/home/scanar/endovis/models/MaskDINO/data/endoscapes_cutmargins/annotations_201/train_annotation_coco.json",
-    output_dir="/home/scanar/endovis/models/MaskDINO/visualizations/compare_segms",
-    num_samples=5
+    output_dir="/home/scanar/endovis/models/MaskDINO/visualizations/compare_segms"
 )
