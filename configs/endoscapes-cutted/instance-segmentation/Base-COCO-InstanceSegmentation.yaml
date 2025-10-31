@@ -13,13 +13,16 @@ MODEL:
     OUT_FEATURES: ["res2", "res3", "res4", "res5"]
     # NORM: "SyncBN"
     RES5_MULTI_GRID: [1, 1, 1]  # not used
+WANDB:
+  PROJECT: "MaskDINO_EndoScapes-Cutted"
+  NAME: "Debug"
 DATASETS:
   TRAIN: ("endoscapes-cutted_train",)
   TEST: ("endoscapes-cutted_val",)
 SOLVER:
   IMS_PER_BATCH: 2
   BASE_LR: 0.0001
-  STEPS: (4300, 7568)
+  STEPS: (3956, 4300, 7224)
   MAX_ITER: 8600
   WARMUP_FACTOR: 1.0
   WARMUP_ITERS: 10

@@ -58,7 +58,7 @@ def plot_preds_comparison(coco_gt_path: str, coco_json_paths: list, images_dir: 
     Compatible with Detectron2 COCO-style outputs (list of dicts with RLEs or polygons).
     Creates one subfolder per image and generates:
     - General mask plot
-    - Plots per confidence interval (0.0–0.1, …, 0.9–1.0)
+    - Plots per confidence interval (0.0-0.1, …, 0.9-1.0)
     """
     assert len(coco_json_paths) > 0, "At least one COCO JSON path must be provided."
     
@@ -151,7 +151,11 @@ def plot_preds_comparison(coco_gt_path: str, coco_json_paths: list, images_dir: 
                 plt.close(fig)
 
             # -------- General (all scores) --------
-            plot_for_preds(dict_preds, "(all scores)", "general.png")
+            filtered_general_preds = {}
+            for run_name, preds_by_image in dict_preds.items():
+                high_conf_preds = [p for p in preds_by_image.get(img_id, []) if p.get("score", 0) >= 0.7]
+                filtered_general_preds[run_name] = {img_id: high_conf_preds}
+            plot_for_preds(filtered_general_preds, "(score ≥ 0.7)", "general.png")
 
             # -------- Confidence thresholds --------
             for low, high in conf_ranges:

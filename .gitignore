@@ -55,5 +55,6 @@ _darcs
 /outputs
 
 #Project specific
+wandb/
 *.pt
 *.log

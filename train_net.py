@@ -72,6 +72,9 @@ from utils import load_json
 
 from coco_evaluation_features import COCOEvaluator
 
+from maskdino.utils.events import WandbWriter, setup_wandb
+
+
 def metadata_from_json(json_file):
     cats_data = sorted(
         load_json(json_file)["categories"],
@@ -428,6 +431,31 @@ class Trainer(DefaultTrainer):
             optimizer = maybe_add_gradient_clipping(cfg, optimizer)
         return optimizer
 
+    def build_writers(self):
+        """
+        Build a list of writers to be used. By default it contains
+        writers that write metrics to the screen,
+        a json file, and a tensorboard event file respectively.
+        If you'd like a different list of writers, you can overwrite it in
+        your trainer.
+        Returns:
+            list[EventWriter]: a list of :class:`EventWriter` objects.
+        It is now implemented by:
+        ::
+            return [
+                CommonMetricPrinter(self.max_iter),
+                JSONWriter(os.path.join(self.cfg.OUTPUT_DIR, "metrics.json")),
+                TensorboardXWriter(self.cfg.OUTPUT_DIR),
+            ]
+        """
+        # Here the default print/log frequency of each writer is used.
+        return [
+            # It may not always print what you want to see, since it prints "common" metrics only.
+            WandbWriter()
+        ]
+
+
+
     @classmethod
     def test_with_TTA(cls, cfg, model):
         logger = logging.getLogger("detectron2.trainer")
@@ -457,6 +485,8 @@ def setup(args):
     cfg.merge_from_list(args.opts)
     cfg.freeze()
     default_setup(cfg, args)
+    if not args.eval_only:
+        setup_wandb(cfg, args)
     setup_logger(
         output=cfg.OUTPUT_DIR, distributed_rank=comm.get_rank(), name="maskdino"
     )

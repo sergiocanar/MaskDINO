@@ -22,6 +22,11 @@ def add_maskdino_config(cfg):
     # Pad image and segmentation GT in dataset mapper.
     cfg.INPUT.SIZE_DIVISIBILITY = -1
 
+    #wandb
+    cfg.WANDB=CN()
+    cfg.WANDB.PROJECT="MaskDINO"
+    cfg.WANDB.NAME=None
+
     # solver config
     # weight decay on embedding
     cfg.SOLVER.WEIGHT_DECAY_EMBED = 0.0
