@@ -8,6 +8,18 @@ import matplotlib.patches as patches
 import pycocotools.mask as mask_util
 from os.path import join as path_join
 from detectron2.structures import BoxMode
+from pycocotools import mask as maskUtils
+
+
+def decode_rle_to_mask(rle):
+    """Decode RLE to a binary numpy mask of shape (h, w)."""
+    return maskUtils.decode(rle).astype(np.uint8)
+
+def encode_mask_to_rle(mask):
+    rle = maskUtils.encode(np.asfortranarray(mask.astype(np.uint8)))
+    rle['counts'] = rle['counts'].decode('ascii')  # make JSON-serializable
+    return rle
+
 
 def remove_duplicates_n_features(instances):
     """
