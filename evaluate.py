@@ -132,6 +132,37 @@ def run_coco_eval(gt_path, preds, eval_type='segm'):
         
     return metrics
 
+def run_binary_coco_eval(gt_path, preds, eval_type='segm'):
+    coco_gt = COCO(gt_path)
+    gt = coco_gt.dataset.copy()
+
+    for ann in gt["annotations"]:
+        ann["category_id"] = 1
+    gt["categories"] = [{"id": 1, "name": "object"}]
+    coco_gt = COCO()
+    coco_gt.dataset = gt
+    coco_gt.createIndex()
+
+    if isinstance(preds, dict) and "annotations" in preds:
+        preds = preds["annotations"]
+    for p in preds:
+        p["category_id"] = 1
+        for k in ["decoder_out", "score_dist", "mask_embd", "global_ft"]:
+            p.pop(k, None)
+        if eval_type == "segm":
+            p.pop("bbox", None)
+
+    coco_dt = coco_gt.loadRes(preds)
+
+    coco_eval = COCOeval(coco_gt, coco_dt, eval_type)
+    coco_eval.params.iouThrs = np.linspace(0.5, 0.95, 10)
+    coco_eval.params.maxDets = [1, 10, 100]
+    coco_eval.evaluate()
+    coco_eval.accumulate()
+    coco_eval.summarize()
+
+    return {"binary_mAP": round(float(coco_eval.stats[0]) * 100, 3)}
+
 
 def format_horizontal_table(metrics_dict, n_cols=6, default_category="Overall"):
     assert n_cols % 3 == 0, "n_cols debe ser múltiplo de 3"
@@ -195,7 +226,9 @@ def main(coco_ann_path: str, pred_path:str, compute_coco: bool, preds: dict, tas
             print(f"\n Running official COCO evaluation ({coco_type})...")
             print(f"--------------------------------------------------------")
             coco_metrics = run_coco_eval(coco_ann_path, preds_raw, coco_type)
+            binary_coco_metrics = run_binary_coco_eval(coco_ann_path, preds_raw, "segm")
             all_metrics[f"COCO_{coco_type}"] = coco_metrics
+            all_metrics[f"Binary_COCO_{coco_type}"] = binary_coco_metrics
     else:
         print('Skipping COCO metrics computation...')
     
@@ -271,12 +304,14 @@ def main(coco_ann_path: str, pred_path:str, compute_coco: bool, preds: dict, tas
                 save_json_data[sufix] = all_metrics[task]
                 if compute_coco:
                     save_json_data["COCO_segm"] = all_metrics.get('COCO_segm', {})
+                    save_json_data["Binary_COCO_segm"] = all_metrics.get('Binary_COCO_segm', {})
             else:
                 save_json_data = {
                     sufix: all_metrics[task]
                 }
                 if compute_coco:
                     save_json_data["COCO_segm"] = all_metrics.get('COCO_segm', {})
+                    save_json_data["Binary_COCO_segm"] = all_metrics.get('Binary_COCO_segm', {})
                     
             save_json_path = path_join(output_dir, f"metrics_{met_suf}.json")
             save_json(save_json_data, save_json_path)
@@ -302,7 +337,7 @@ def main(coco_ann_path: str, pred_path:str, compute_coco: bool, preds: dict, tas
                     else:
                         for class_name, class_ap in v.items():
                             new_row[f"COCO_segm-per_class_AP-{class_name}"] = class_ap
-                                                
+                                                            
             new_df = pd.DataFrame([new_row])
 
             # updated_df = existing_df.append(new_df, ignore_index=True)
