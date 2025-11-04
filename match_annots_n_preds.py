@@ -11,7 +11,7 @@ import pycocotools.mask as m
 
 from tqdm import tqdm
 from copy import deepcopy
-from utils import load_json, save_json
+from utils import load_json, save_json, remove_duplicates_n_features
 from scipy.optimize import linear_sum_assignment
 
 def match_annots_parser():
@@ -406,42 +406,6 @@ def xywh_to_x1y1x2y2(bbox):
 
     # Return the converted bounding box
     return xy_bbox
-
-
-def remove_duplicates_n_features(instances):
-    """
-    This function removes duplicate instances based on their bounding boxes, keeping the instance with the highest score.
-
-    Parameters:
-    instances : list of dicts
-        Each dictionary represents an instance with keys including 'bbox' (bounding box) and 'score'.
-
-    Returns:
-    list of dicts
-        A list of unique instances, where each bounding box appears only once, keeping the instance with the highest score.
-    """
-
-    # Initialize a dictionary to store unique instances keyed by their bounding boxes
-    no_dups = {}
-
-    # Iterate through each instance
-    for inst in instances:
-        # Only consider instances with a positive score
-        if inst["score"] > 0:
-            # Convert the bounding box to a tuple to use as a dictionary key
-            bbox_key = tuple(inst["bbox"])
-
-            # If the bounding box is not already in the dictionary, add the instance
-            if bbox_key not in no_dups:
-                no_dups[bbox_key] = inst
-            else:
-                # If the bounding box is already in the dictionary, keep the instance with the higher score
-                if inst["score"] > no_dups[bbox_key]["score"]:
-                    no_dups[bbox_key] = inst
-
-    # Return the list of unique instances
-    return list(no_dups.values())
-
 
 def filter_preds(preds_list, method, parameters):
     """
