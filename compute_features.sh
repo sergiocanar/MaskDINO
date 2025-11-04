@@ -1,4 +1,4 @@
-CUDA_VISIBLE_DEVICES=0,1,2,4,5,6,7 python train_net.py --num-gpus 7 --eval-only \
+CUDA_VISIBLE_DEVICES=0,1,2,3 python train_net.py --num-gpus 4 --eval-only \
 --config-file configs/endoscapes/instance-segmentation/swin/maskdino_R50_bs16_50ep_4s_dowsample1_2048.yaml \
-MODEL.WEIGHTS /home/scanar/endovis/models/MaskDINO_Challenge/outputs/Endoscapes2023_train_og/model_best.pth \
-OUTPUT_DIR outputs/endoscapes2023/train_features \
+MODEL.WEIGHTS outputs/endoscapes2023_cutmargins/annotations_lr_0_0001_train/model_best.pth \
+OUTPUT_DIR outputs/endoscapes2023_features/train_features \
