@@ -1,17 +1,84 @@
-import argparse
-from copy import deepcopy
-import itertools
+import os
+import cv2
 import json
+import torch
+import warnings
+import argparse
+import itertools
 import traceback
 import numpy as np
-import torch
-import os
 import pycocotools.mask as m
-import cv2
-from scipy.optimize import linear_sum_assignment
-from tqdm import tqdm
-import warnings
 
+from tqdm import tqdm
+from copy import deepcopy
+from scipy.optimize import linear_sum_assignment
+from utils import load_json, save_json
+
+def match_annots_parser():
+
+    parser = argparse.ArgumentParser(description="Arguments for predictions matching.")
+
+    parser.add_argument(
+        "--coco_anns_path", type=str, help="Path to COCO JSON with annotations"
+    )
+    parser.add_argument(
+        "--preds_path", type=str, help="Path to file (JSON or pytorch) with predictions"
+    )
+    parser.add_argument(
+        "--out_coco_anns_path", type=str, help="Path to save JSON file with annotations"
+    )
+    parser.add_argument(
+        "--out_coco_preds_path", type=str, help="Path to save JSON file with predictions"
+    )
+    parser.add_argument(
+        "--out_features_path",
+        type=str,
+        help="Path to save pytorch file with prediction features",
+    )
+    parser.add_argument(
+        "--features_key",
+        nargs="+",
+        type=str,
+        default="features",
+        help="Dict key that contains the features",
+    )
+
+    parser.add_argument(
+        "--selection",
+        type=str,
+        default="thresh",
+        choices=[
+            "thresh",  # General threshold filtering
+            "topk",  # General top k filtering
+            "topk_thresh",  # Threshold and top k filtering
+            "cls_thresh",  # Per-class threshold filtering
+            "cls_topk",  # Per-class top k filtering
+            "cls_topk_thresh",  # Per-class top k and and threshold filtering
+            "all",  # No filtering
+        ],
+        help="Prediction selection method",
+    )
+    parser.add_argument("--selection_info", help="Hypermarameters to perform filtering")
+
+    parser.add_argument(
+        "--segmentation",
+        default=False,
+        action="store_true",
+        help="Use segmentation annotations and predictions",
+    )
+
+    # Use these parameter for validation predictions
+    # This argument keeps all predicted masks (after filtering) and only uses ground truth to assign the expected class of each instance for metric calculation
+    parser.add_argument(
+        "--validation",
+        default=False,
+        action="store_true",
+        help="Don use the ground truth annotations as reference for matching",
+    )
+
+    args = parser.parse_args()
+    
+    return args
 
 def gather_info(coco_json):
     """
@@ -449,370 +516,332 @@ def filter_preds(preds_list, method, parameters):
         # Return the filtered predictions list
         return preds_list
 
-
-parser = argparse.ArgumentParser(description="Arguments for predictions matching.")
-
-parser.add_argument(
-    "--coco_anns_path", type=str, help="Path to COCO JSON with annotations"
-)
-parser.add_argument(
-    "--preds_path", type=str, help="Path to file (JSON or pytorch) with predictions"
-)
-parser.add_argument(
-    "--out_coco_anns_path", type=str, help="Path to save JSON file with annotations"
-)
-parser.add_argument(
-    "--out_coco_preds_path", type=str, help="Path to save JSON file with predictions"
-)
-parser.add_argument(
-    "--out_features_path",
-    type=str,
-    help="Path to save pytorch file with prediction features",
-)
-parser.add_argument(
-    "--features_key",
-    nargs="+",
-    type=str,
-    default="features",
-    help="Dict key that contains the features",
-)
-
-parser.add_argument(
-    "--selection",
-    type=str,
-    default="thresh",
-    choices=[
-        "thresh",  # General threshold filtering
-        "topk",  # General top k filtering
-        "topk_thresh",  # Threshold and top k filtering
-        "cls_thresh",  # Per-class threshold filtering
-        "cls_topk",  # Per-class top k filtering
-        "cls_topk_thresh",  # Per-class top k and and threshold filtering
-        "all",  # No filtering
-    ],
-    help="Prediction selection method",
-)
-parser.add_argument("--selection_info", help="Hypermarameters to perform filtering")
-
-parser.add_argument(
-    "--segmentation",
-    default=False,
-    action="store_true",
-    help="Use segmentation annotations and predictions",
-)
-
-# Use these parameter for validation predictions
-# This argument keeps all predicted masks (after filtering) and only uses ground truth to assign the expected class of each instance for metric calculation
-parser.add_argument(
-    "--validation",
-    default=False,
-    action="store_true",
-    help="Don use the ground truth annotations as reference for matching",
-)
-
-args = parser.parse_args()
-
-# Determine selection parameters based on the selection method specified in the arguments
-if args.selection == "thresh":
-    # For threshold-based selection, set the parameters to [None, threshold_value]
-    selection_params = [None, float(args.selection_info)]
-elif args.selection == "topk":
-    # For top-k selection, set the parameters to [k_value, None]
-    selection_params = [int(args.selection_info), None]
-elif args.selection == "topk_thresh":
-    # For combined top-k and threshold selection, ensure the selection_info is a string containing two values separated by a comma
-    assert (
-        type(args.selection_info) == str
-        and "," in args.selection_info
-        and len(args.selection_info.split(",")) == 2
-    )
-
-    # Split the selection_info string into the two parameters, converting them to int and float respectively
-    selection_params = args.selection_info.split(",")
-    selection_params[0] = int(selection_params[0])
-    selection_params[1] = float(selection_params[1])
-elif "cls" in args.selection:
-    # For class-specific selection, ensure selection_info is a valid file path
-    assert type(args.selection_info) == str
-    assert os.path.isfile(args.selection_info)
-
-    # Load the class-specific selection parameters from the JSON file
-    with open(args.selection_info, "r") as f:
-        selection_params = json.load(f)
-elif args.selection == "all":
-    # For selecting all predictions, set the parameters to [None, None]
+def define_selection_params(args: argparse.ArgumentParser):
+    
     selection_params = [None, None]
-else:
-    # Raise an error if the selection type is not recognized
-    raise ValueError(f"Incorrect selection type {args.selection}")
+    
+    # Determine selection parameters based on the selection method specified in the arguments
+    if args.selection == "thresh":
+        # For threshold-based selection, set the parameters to [None, threshold_value]
+        selection_params = [None, float(args.selection_info)]
+    elif args.selection == "topk":
+        # For top-k selection, set the parameters to [k_value, None]
+        selection_params = [int(args.selection_info), None]
+    elif args.selection == "topk_thresh":
+        # For combined top-k and threshold selection, ensure the selection_info is a string containing two values separated by a comma
+        assert (
+            type(args.selection_info) == str
+            and "," in args.selection_info
+            and len(args.selection_info.split(",")) == 2
+        )
 
-# Load the COCO annotations from the specified path
-with open(args.coco_anns_path, "r") as f:
-    coco_anns = json.load(f)
+        # Split the selection_info string into the two parameters, converting them to int and float respectively
+        selection_params = args.selection_info.split(",")
+        selection_params[0] = int(selection_params[0])
+        selection_params[1] = float(selection_params[1])
+    elif "cls" in args.selection:
+        # For class-specific selection, ensure selection_info is a valid file path
+        assert type(args.selection_info) == str
+        assert os.path.isfile(args.selection_info)
+
+        # Load the class-specific selection parameters from the JSON file
+        with open(args.selection_info, "r") as f:
+            selection_params = json.load(f)
+    elif args.selection == "all":
+        # For selecting all predictions, set the parameters to [None, None]
+        selection_params = [None, None]
+    else:
+        # Raise an error if the selection type is not recognized
+        raise ValueError(f"Incorrect selection type {args.selection}")    
+    
+    return selection_params
+
+def preprocess_predictions(args: argparse.ArgumentParser, data_dict: dict):
+    
+    # Process predictions based on the file type (pth or json)
+    if "pth" in args.preds_path:
+        # Load the predictions from a .pth file
+        preds = torch.load(args.preds_path, weights_only=False)
+        # Check for length mismatch between annotations and predictions
+        if len(data_dict) != len(preds):
+            warnings.warn(
+                f"Annotations have a different length than predictions {len(data_dict)}!={len(preds)}. This is probably an error."
+            )
+
+        # Filter predictions for each image and update the data_dict
+        for pred in tqdm(preds, desc="Filtering preds"):
+            instances = filter_preds(pred["instances"], args.selection, selection_params)
+            data_dict[pred["image_id"]]["predictions"].extend(instances)
+            
+            if not "global_ft" in data_dict[pred["image_id"]].keys() and "global_ft" in pred.keys():
+                data_dict[pred["image_id"]]["global_ft"] = pred["global_ft"]
+            else:
+                continue
+
+    elif "json" in args.preds_path:
+        # Load the predictions from a .json file
+        with open(args.preds_path, "r") as f:
+            preds = json.load(f)
+
+        ids = set()
+        # Process each prediction, adjusting the category_id and updating the data_dict
+        for pred in tqdm(preds, desc="Separating preds"):
+            ids.add(pred["image_id"])
+            if pred["category_id"] > 0 and pred["score"] > 0.0:
+                pred["category_id"] -= 1
+                data_dict[pred["image_id"]]["predictions"].append(pred)
+
+        # Check for length mismatch between annotations and predictions
+        if len(data_dict) != len(ids):
+            warnings.warn(
+                f"Annotations have a different length than predictions {len(data_dict)}!={len(ids)}. This is probably an error."
+            )
+
+        # Filter predictions for each image and update the data_dict
+        for idx in tqdm(data_dict, desc="Filtering preds"):
+            instances = filter_preds(
+                data_dict[idx]["predictions"], args.selection, selection_params
+            )
+            data_dict[idx]["predictions"] = instances
+            
+    return data_dict
+
+
+
+if __name__ == "__main__":
+    
+    args = match_annots_parser()
+    
+    #Load COCO annotations JSON
+    coco_anns = load_json(args.coco_anns_path)
+        
     # Process the annotations and gather information into data_dict and id2name
     data_dict, id2name = gather_info(coco_anns)
     # Clear the 'images' and 'annotations' fields in the COCO annotations dictionary
     coco_anns = {
         k: v if k not in ["images", "annotations"] else [] for k, v in coco_anns.items()
     }
-
-# Process predictions based on the file type (pth or json)
-if "pth" in args.preds_path:
-    # Load the predictions from a .pth file
-    preds = torch.load(args.preds_path, weights_only=False)
-    # Check for length mismatch between annotations and predictions
-    if len(data_dict) != len(preds):
-        warnings.warn(
-            f"Annotations have a different length than predictions {len(data_dict)}!={len(preds)}. This is probably an error."
-        )
-
-    # Filter predictions for each image and update the data_dict
-    for pred in tqdm(preds, desc="Filtering preds"):
-        instances = filter_preds(pred["instances"], args.selection, selection_params)
-        data_dict[pred["image_id"]]["predictions"].extend(instances)
-        
-        if not "global_ft" in data_dict[pred["image_id"]].keys() and "global_ft" in pred.keys():
-            data_dict[pred["image_id"]]["global_ft"] = pred["global_ft"]
-        else:
-            continue
-
-elif "json" in args.preds_path:
-    # Load the predictions from a .json file
-    with open(args.preds_path, "r") as f:
-        preds = json.load(f)
-
-    ids = set()
-    # Process each prediction, adjusting the category_id and updating the data_dict
-    for pred in tqdm(preds, desc="Separating preds"):
-        ids.add(pred["image_id"])
-        if pred["category_id"] > 0 and pred["score"] > 0.0:
-            pred["category_id"] -= 1
-            data_dict[pred["image_id"]]["predictions"].append(pred)
-
-    # Check for length mismatch between annotations and predictions
-    if len(data_dict) != len(ids):
-        warnings.warn(
-            f"Annotations have a different length than predictions {len(data_dict)}!={len(ids)}. This is probably an error."
-        )
-
-    # Filter predictions for each image and update the data_dict
-    for idx in tqdm(data_dict, desc="Filtering preds"):
-        instances = filter_preds(
-            data_dict[idx]["predictions"], args.selection, selection_params
-        )
-        data_dict[idx]["predictions"] = instances
-
-# Prepare the final annotation and prediction dictionaries for saving
-save_ann_dict = deepcopy(coco_anns)
-save_ann_dict["instruments_categories"] = save_ann_dict["categories"]
-del save_ann_dict["categories"]
-
-save_pred_dict = deepcopy(coco_anns)
-save_pred_dict["instruments_categories"] = save_pred_dict["categories"]
-del save_pred_dict["categories"]
-
-# Initialize an empty list to save features
-save_feats = []
-
-# Initialize a counter for predicted annotations
-pred_anns = 0
-
-# Iterate through each image in the data dictionary
-for idx in tqdm(data_dict, desc="Matching annotations"):
-
-    # Extract annotations, predictions, and image dimensions for the current image
-    annotations = data_dict[idx]["annotations"]
-    num_annots = len(annotations)
-    predictions = data_dict[idx]["predictions"]
-    num_preds = len(predictions)
-    width = data_dict[idx]["width"]
-    height = data_dict[idx]["height"]
     
-    # Prepare a dictionary to save features for the current image
-    feat_save = {
-        "image_id": idx,
-        "file_name": data_dict[idx]["file_name"],
-        "features": {},
-        "width": width,
-        "height": height,
-        "global_features": data_dict[idx]["global_ft"] if "global_ft" in data_dict[idx].keys() else [],
-    }
+    #Selection parameters
+    selection_params = define_selection_params(args=args)
+    
+    #Filter and preprocess predictions 
+    data_dict = preprocess_predictions(args=args, data_dict=data_dict)
 
-    # Copy basic image information to the annotations and predictions dictionaries
-    this_im = {
-        k: v
-        for k, v in data_dict[idx].items()
-        if k not in ["annotations", "predictions"]
-    }
-    save_ann_dict["images"].append(this_im)
-    save_ann_dict["annotations"].extend(annotations)
-    save_pred_dict["images"].append(this_im)
+    # Prepare the final annotation and prediction dictionaries for saving
+    save_ann_dict = deepcopy(coco_anns)
+    save_ann_dict["instruments_categories"] = save_ann_dict["categories"]
+    del save_ann_dict["categories"]
+    
+    save_pred_dict = deepcopy(coco_anns)
+    save_pred_dict["instruments_categories"] = save_pred_dict["categories"]
+    del save_pred_dict["categories"]
 
-    if num_annots > 0 and num_preds > 0:
-        # Initialize an IoU matrix for annotations and predictions
-        ious = np.zeros((num_annots, num_preds))
+    # Initialize an empty list to save features
+    save_feats = []
 
-        for ann_id, ann in enumerate(annotations):
+    # Initialize a counter for predicted annotations
+    pred_anns = 0
+
+    # Iterate through each image in the data dictionary
+    for idx in tqdm(data_dict, desc="Matching annotations"):
+
+        # Extract annotations, predictions, and image dimensions for the current image
+        annotations = data_dict[idx]["annotations"]
+        num_annots = len(annotations)
+        predictions = data_dict[idx]["predictions"]
+        num_preds = len(predictions)
+        width = data_dict[idx]["width"]
+        height = data_dict[idx]["height"]
+        
+        # Prepare a dictionary to save features for the current image
+        feat_save = {
+            "image_id": idx,
+            "file_name": data_dict[idx]["file_name"],
+            "features": {},
+            "width": width,
+            "height": height,
+            "global_features": data_dict[idx]["global_ft"] if "global_ft" in data_dict[idx].keys() else [],
+            "obj_features": {}
+        }
+
+        # Copy basic image information to the annotations and predictions dictionaries
+        this_im = {
+            k: v
+            for k, v in data_dict[idx].items()
+            if k not in ["annotations", "predictions"]
+        }
+        save_ann_dict["images"].append(this_im)
+        save_pred_dict["images"].append(this_im)
+        save_ann_dict["annotations"].extend(annotations)
+        
+        breakpoint()
+
+        if num_annots > 0 and num_preds > 0:
+            # Initialize an IoU matrix for annotations and predictions
+            ious = np.zeros((num_annots, num_preds))
+
+            for ann_id, ann in enumerate(annotations):
+                for pred_id, pred in enumerate(predictions):
+                    # Convert bounding boxes to [x1, y1, x2, y2] format
+                    ann_box = ann["bbox"]
+                    ann_box = [
+                        ann_box[0],
+                        ann_box[1],
+                        ann_box[2] + ann_box[0],
+                        ann_box[3] + ann_box[1],
+                    ]
+
+                    if args.segmentation and pred["bbox"] == [0, 0, 0, 0]:
+                        breakpoint()
+
+                    pred_box = pred["bbox"]
+                    pred_box = [
+                        pred_box[0],
+                        pred_box[1],
+                        pred_box[2] + pred_box[0],
+                        pred_box[3] + pred_box[1],
+                    ]
+
+                    # Compute the IoU for this annotation and prediction bounding boxes
+                    bbox_iou = compute_bbox_iou(ann_box, pred_box)
+
+                    # If segment masks present and and bounding boxes IoU is not 0
+                    if args.segmentation and bbox_iou > 0:
+                        # Decode the masks and compute the mask IoU
+                        breakpoint()
+                        if type(ann["segmentation"]) == list:  # Is polygon mask
+                            ann_mask = decode_polygon_to_mask(
+                                ann["segmentation"], width, height
+                            )
+                        elif type(ann["segmentation"]) == dict:  # Is RLE mask
+                            ann_mask = decode_rle_to_mask(ann["segmentation"])
+
+                        # Pred masks are always RLEs
+                        pred_mask = decode_rle_to_mask(pred["segmentation"])
+
+                        # Compute mask IoU
+                        mask_iou = compute_mask_iou(ann_mask, pred_mask)
+                        ious[ann_id, pred_id] = mask_iou
+                    else:
+                        ious[ann_id, pred_id] = bbox_iou
+
+            # Keep all predicted masks (after filtering) and only use ground truths to assign espected validation class
+            if args.validation:
+
+                # Assign a highest annotation IoU for each prediction (to assign the expected class of each prediction)
+                indices = np.argmax(ious, axis=0)
+
+                # Iterate through ALL prediction
+                for pred_id, ann_id in enumerate(indices):
+                    pred_anns += 1
+
+                    # Get the annotation instance with highest IoU
+                    this_ann = deepcopy(annotations[ann_id])
+                    # Current prediction
+                    this_pred = predictions[pred_id]
+
+                    # Assign prediction ID according to number of counted predictions
+                    this_ann["id"] = pred_anns
+
+                    # Keep the predicted bounding box instead of the annotated bounding box
+                    this_ann["bbox"] = list(map(round, this_pred["bbox"]))
+
+                    # Include the predicted score
+                    this_ann["score"] = this_pred["score"]
+
+                    # Save prediction
+                    box_key = tuple(xywh_to_x1y1x2y2(this_pred["bbox"]))
+                    feat_save["features"][box_key] = list(
+                        itertools.chain(*[this_pred[f_key] for f_key in args.features_key])
+                    )  # Concatenate features
+
+                    # Keep predicted segment instead of ground truth segment
+                    if args.segmentation:
+                        this_ann["segmentation"] = this_pred["segmentation"]
+                    save_pred_dict["annotations"].append(this_ann)
+
+            else:
+                # Use the Hungarian algorithm to match annotations and predictions and assign an independent prediction to each annotation (and discard unassigned predictions)
+                # This is necessarry to obtain a region feature for each annotated instance
+                row_indices, col_indices = linear_sum_assignment(-ious)
+                matches = list(zip(row_indices, col_indices))
+
+                for ann_id, pred_id in matches:
+                    pred_anns += 1
+                    this_ann = deepcopy(annotations[ann_id])
+                    this_pred = predictions[pred_id]
+                    this_ann["id"] = pred_anns
+                    this_ann["bbox"] = list(map(round, this_pred["bbox"]))
+                    this_ann["score"] = this_pred["score"]
+                    box_key = tuple(xywh_to_x1y1x2y2(this_pred["bbox"]))
+                    feat_save["features"][box_key] = list(
+                        itertools.chain(*[this_pred[f_key] for f_key in args.features_key])
+                    )
+                    if args.segmentation:
+                        this_ann["segmentation"] = this_pred["segmentation"]
+                    save_pred_dict["annotations"].append(this_ann)
+
+        elif num_preds > 0 and (args.validation or num_annots == 0):
+            # Save predictions even if no annotations (or in validation mode)
             for pred_id, pred in enumerate(predictions):
-                # Convert bounding boxes to [x1, y1, x2, y2] format
-                ann_box = ann["bbox"]
-                ann_box = [
-                    ann_box[0],
-                    ann_box[1],
-                    ann_box[2] + ann_box[0],
-                    ann_box[3] + ann_box[1],
-                ]
-
-                if args.segmentation and pred["bbox"] == [0, 0, 0, 0]:
-                    breakpoint()
-
-                pred_box = pred["bbox"]
-                pred_box = [
-                    pred_box[0],
-                    pred_box[1],
-                    pred_box[2] + pred_box[0],
-                    pred_box[3] + pred_box[1],
-                ]
-
-                # Compute the IoU for this annotation and prediction bounding boxes
-                bbox_iou = compute_bbox_iou(ann_box, pred_box)
-
-                # If segment masks present and and bounding boxes IoU is not 0
-                if args.segmentation and bbox_iou > 0:
-                    # Decode the masks and compute the mask IoU
-                    breakpoint()
-                    if type(ann["segmentation"]) == list:  # Is polygon mask
-                        ann_mask = decode_polygon_to_mask(
-                            ann["segmentation"], width, height
-                        )
-                    elif type(ann["segmentation"]) == dict:  # Is RLE mask
-                        ann_mask = decode_rle_to_mask(ann["segmentation"])
-
-                    # Pred masks are always RLEs
-                    pred_mask = decode_rle_to_mask(pred["segmentation"])
-
-                    # Compute mask IoU
-                    mask_iou = compute_mask_iou(ann_mask, pred_mask)
-                    ious[ann_id, pred_id] = mask_iou
-                else:
-                    ious[ann_id, pred_id] = bbox_iou
-
-        # Keep all predicted masks (after filtering) and only use ground truths to assign espected validation class
-        if args.validation:
-
-            # Assign a highest annotation IoU for each prediction (to assign the expected class of each prediction)
-            indices = np.argmax(ious, axis=0)
-
-            # Iterate through ALL prediction
-            for pred_id, ann_id in enumerate(indices):
                 pred_anns += 1
-
-                # Get the annotation instance with highest IoU
-                this_ann = deepcopy(annotations[ann_id])
-                # Current prediction
-                this_pred = predictions[pred_id]
-
-                # Assign prediction ID according to number of counted predictions
-                this_ann["id"] = pred_anns
-
-                # Keep the predicted bounding box instead of the annotated bounding box
-                this_ann["bbox"] = list(map(round, this_pred["bbox"]))
-
-                # Include the predicted score
-                this_ann["score"] = this_pred["score"]
-
-                # Save prediction
-                box_key = tuple(xywh_to_x1y1x2y2(this_pred["bbox"]))
+                this_pred = {
+                    "id": pred_anns,
+                    "image_id": idx,
+                    "image_name": data_dict[idx]["file_name"],
+                    "category_id": pred["category_id"] + 1,
+                    "instruments": pred["category_id"] + 1,
+                    "actions": [1],
+                    "bbox": list(map(round, pred["bbox"])),
+                    "iscrowd": 0,
+                    "area": pred["bbox"][2] * pred["bbox"][3],
+                    "score": pred["score"],
+                }
+                box_key = tuple(xywh_to_x1y1x2y2(pred["bbox"]))
                 feat_save["features"][box_key] = list(
-                    itertools.chain(*[this_pred[f_key] for f_key in args.features_key])
-                )  # Concatenate features
-
-                # Keep predicted segment instead of ground truth segment
-                if args.segmentation:
-                    this_ann["segmentation"] = this_pred["segmentation"]
-                save_pred_dict["annotations"].append(this_ann)
-
-        else:
-            # Use the Hungarian algorithm to match annotations and predictions and assign an independent prediction to each annotation (and discard unassigned predictions)
-            # This is necessarry to obtain a region feature for each annotated instance
-            row_indices, col_indices = linear_sum_assignment(-ious)
-            matches = list(zip(row_indices, col_indices))
-
-            for ann_id, pred_id in matches:
-                pred_anns += 1
-                this_ann = deepcopy(annotations[ann_id])
-                this_pred = predictions[pred_id]
-                this_ann["id"] = pred_anns
-                this_ann["bbox"] = list(map(round, this_pred["bbox"]))
-                this_ann["score"] = this_pred["score"]
-                box_key = tuple(xywh_to_x1y1x2y2(this_pred["bbox"]))
-                feat_save["features"][box_key] = list(
-                    itertools.chain(*[this_pred[f_key] for f_key in args.features_key])
+                    itertools.chain(*[pred[f_key] for f_key in args.features_key])
                 )
-                if args.segmentation:
-                    this_ann["segmentation"] = this_pred["segmentation"]
-                save_pred_dict["annotations"].append(this_ann)
 
-    elif num_preds > 0 and (args.validation or num_annots == 0):
-        # Save predictions even if no annotations (or in validation mode)
-        for pred_id, pred in enumerate(predictions):
+                if args.segmentation:
+                    this_pred["segmentation"] = pred["segmentation"]
+                save_pred_dict["annotations"].append(this_pred)
+
+
+        elif num_preds == 0:
+            # Handle cases with no predictions
             pred_anns += 1
             this_pred = {
                 "id": pred_anns,
                 "image_id": idx,
                 "image_name": data_dict[idx]["file_name"],
-                "category_id": pred["category_id"] + 1,
-                "instruments": pred["category_id"] + 1,
-                "actions": [1],
-                "bbox": list(map(round, pred["bbox"])),
+                "category_id": -1,
+                "instruments": -1,
+                "actions": [-1],
+                "bbox": [0, 0, 0, 0],
                 "iscrowd": 0,
-                "area": pred["bbox"][2] * pred["bbox"][3],
-                "score": pred["score"],
+                "area": 0,
+                "score": 1,
             }
-            box_key = tuple(xywh_to_x1y1x2y2(pred["bbox"]))
-            feat_save["features"][box_key] = list(
-                itertools.chain(*[pred[f_key] for f_key in args.features_key])
-            )
-
             if args.segmentation:
-                this_pred["segmentation"] = pred["segmentation"]
+                this_pred["segmentation"] = {}
             save_pred_dict["annotations"].append(this_pred)
 
+        # Append the feature save dictionary to the save_feats list
+        save_feats.append(feat_save)
+        
+    # breakpoint()
+    # if len(predictions) > 0 and "global_ft" in predictions[0]:
+    #     feat_save["global_features"] = predictions[0]["global_ft"]
 
-    elif num_preds == 0:
-        # Handle cases with no predictions
-        pred_anns += 1
-        this_pred = {
-            "id": pred_anns,
-            "image_id": idx,
-            "image_name": data_dict[idx]["file_name"],
-            "category_id": -1,
-            "instruments": -1,
-            "actions": [-1],
-            "bbox": [0, 0, 0, 0],
-            "iscrowd": 0,
-            "area": 0,
-            "score": 1,
-        }
-        if args.segmentation:
-            this_pred["segmentation"] = {}
-        save_pred_dict["annotations"].append(this_pred)
+    # Save output files
+    os.makedirs(os.path.dirname(args.out_coco_anns_path), exist_ok=True)
+    with open(args.out_coco_anns_path, 'w') as f:
+        json.dump(save_ann_dict, f, indent=4)
 
-    # Append the feature save dictionary to the save_feats list
-    save_feats.append(feat_save)
-    
-# breakpoint()
-# if len(predictions) > 0 and "global_ft" in predictions[0]:
-#     feat_save["global_features"] = predictions[0]["global_ft"]
+    os.makedirs(os.path.dirname(args.out_coco_preds_path), exist_ok=True)
+    with open(args.out_coco_preds_path, 'w') as b:
+        json.dump(save_pred_dict, b, indent=4)
 
-# Save output files
-os.makedirs(os.path.dirname(args.out_coco_anns_path), exist_ok=True)
-with open(args.out_coco_anns_path, 'w') as f:
-    json.dump(save_ann_dict, f, indent=4)
-
-os.makedirs(os.path.dirname(args.out_coco_preds_path), exist_ok=True)
-with open(args.out_coco_preds_path, 'w') as b:
-    json.dump(save_pred_dict, b, indent=4)
-
-os.makedirs(os.path.dirname(args.out_features_path), exist_ok=True)
-torch.save(save_feats, args.out_features_path)
+    os.makedirs(os.path.dirname(args.out_features_path), exist_ok=True)
+    torch.save(save_feats, args.out_features_path)
