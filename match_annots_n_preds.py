@@ -11,8 +11,8 @@ import pycocotools.mask as m
 
 from tqdm import tqdm
 from copy import deepcopy
-from scipy.optimize import linear_sum_assignment
 from utils import load_json, save_json
+from scipy.optimize import linear_sum_assignment
 
 def match_annots_parser():
 
@@ -673,9 +673,7 @@ if __name__ == "__main__":
         }
         save_ann_dict["images"].append(this_im)
         save_pred_dict["images"].append(this_im)
-        save_ann_dict["annotations"].extend(annotations)
-        
-        breakpoint()
+        save_ann_dict["annotations"].extend(annotations)        
 
         if num_annots > 0 and num_preds > 0:
             # Initialize an IoU matrix for annotations and predictions
@@ -775,7 +773,7 @@ if __name__ == "__main__":
                     this_ann["bbox"] = list(map(round, this_pred["bbox"]))
                     this_ann["score"] = this_pred["score"]
                     box_key = tuple(xywh_to_x1y1x2y2(this_pred["bbox"]))
-                    feat_save["features"][box_key] = list(
+                    feat_save["obj_features"][box_key] = list(
                         itertools.chain(*[this_pred[f_key] for f_key in args.features_key])
                     )
                     if args.segmentation:
@@ -829,10 +827,6 @@ if __name__ == "__main__":
 
         # Append the feature save dictionary to the save_feats list
         save_feats.append(feat_save)
-        
-    # breakpoint()
-    # if len(predictions) > 0 and "global_ft" in predictions[0]:
-    #     feat_save["global_features"] = predictions[0]["global_ft"]
 
     # Save output files
     os.makedirs(os.path.dirname(args.out_coco_anns_path), exist_ok=True)
@@ -845,3 +839,5 @@ if __name__ == "__main__":
 
     os.makedirs(os.path.dirname(args.out_features_path), exist_ok=True)
     torch.save(save_feats, args.out_features_path)
+    
+    print(f'Features saved to: {args.out_features_path}')
