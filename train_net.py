@@ -29,6 +29,7 @@ import detectron2.utils.comm as comm
 from detectron2.checkpoint import DetectionCheckpointer
 from detectron2.config import get_cfg
 from detectron2.data import MetadataCatalog, build_detection_train_loader
+from detectron2.utils.events import CommonMetricPrinter, JSONWriter
 
 from detectron2.evaluation import (
     CityscapesInstanceEvaluator,
@@ -451,6 +452,8 @@ class Trainer(DefaultTrainer):
         # Here the default print/log frequency of each writer is used.
         return [
             # It may not always print what you want to see, since it prints "common" metrics only.
+            CommonMetricPrinter(self.max_iter),
+            JSONWriter(os.path.join(self.cfg.OUTPUT_DIR, "metrics.json")),
             WandbWriter()
         ]
 
