@@ -33,7 +33,7 @@ def add_maskdino_config(cfg):
     # optimizer
     cfg.SOLVER.OPTIMIZER = "ADAMW"
     cfg.SOLVER.BACKBONE_MULTIPLIER = 0.1
-
+    
     # MaskDINO model config
     cfg.MODEL.MaskDINO = CN()
     cfg.MODEL.MaskDINO.LEARN_TGT = False
