@@ -15,7 +15,7 @@ MODEL:
     RES5_MULTI_GRID: [1, 1, 1]  # not used
 DATASETS:
   TRAIN: ("endoscapes_train",)
-  TEST: ("endoscapes_test",)
+  TEST: ("endoscapes_val",)
 SOLVER:
   IMS_PER_BATCH: 4
   BASE_LR: 0.00001

@@ -10,13 +10,16 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import cv2
 import numpy as np
+from glob import glob
 from tqdm import tqdm
 from os.path import join as path_join
 from skimage.morphology import binary_erosion, disk
 from utils import load_json, create_directory_if_not_exists
 
 def change_size(image):
- 
+    
+    coords = None
+    
     binary_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     _, binary_image2 = cv2.threshold(binary_image, 15, 255, cv2.THRESH_BINARY)
     binary_image2 = cv2.medianBlur(binary_image2, 19)  # filter the noise, need to adjust the parameter based on the dataset
@@ -32,7 +35,7 @@ def change_size(image):
                 edges_y.append(j)
     
     if not edges_x:
-        return image
+        return image, coords
 
     left = min(edges_x)  # left border
     right = max(edges_x)  # right
@@ -119,7 +122,7 @@ if __name__ == "__main__":
     
     debug_dir = path_join(parent_dir, 'debug')
     create_directory_if_not_exists(debug_dir)
-    
+        
     with tqdm(total=len(img_lt), desc='Cutting margins...', unit='frames') as pbar:            
         for img_file in img_lt:
             
@@ -131,3 +134,16 @@ if __name__ == "__main__":
                         save_path=save_path)
             debug_counter += 1
             pbar.update(1)
+    
+    # src_dir = '/home/scanar/endovis/Datasets/endoscapes/frames'
+    # dst_dir = '/home/scanar/endovis/Datasets/endoscapes/cutmargins_frames'
+    # os.makedirs(dst_dir, exist_ok=True)
+    # video_lt = os.listdir(src_dir)
+    
+    # for video in tqdm(video_lt, desc="Videos", unit="video"):
+    #     frames_in_video_lt = glob(os.path.join(src_dir, video, '*.jpg'))
+    #     dst_video_dir = os.path.join(dst_dir, video)
+    #     os.makedirs(dst_video_dir, exist_ok=True)
+        
+    #     for img_path in tqdm(frames_in_video_lt, desc=f"{video}", leave=False, unit="frame"):
+    #         process_image(frame_src=img_path, save_path=dst_video_dir)

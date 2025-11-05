@@ -668,10 +668,9 @@ if __name__ == "__main__":
                     # Compute the IoU for this annotation and prediction bounding boxes
                     bbox_iou = compute_bbox_iou(ann_box, pred_box)
 
-                    # If segment masks present and and bounding boxes IoU is not 0
+                    # If segment masks present and  bounding boxes IoU is not 0
                     if args.segmentation and bbox_iou > 0:
                         # Decode the masks and compute the mask IoU
-                        breakpoint()
                         if type(ann["segmentation"]) == list:  # Is polygon mask
                             ann_mask = decode_polygon_to_mask(
                                 ann["segmentation"], width, height
